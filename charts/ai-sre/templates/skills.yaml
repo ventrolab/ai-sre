@@ -1,0 +1,21 @@
+{{- $skills := dict -}}
+{{- if .Values.knowledge.includeDefault -}}
+{{- range $path, $_ := .Files.Glob "files/skills/*/SKILL.md" -}}
+{{- $_ := set $skills (base (dir $path)) ($.Files.Get $path) -}}
+{{- end -}}
+{{- end -}}
+{{- range $name, $body := .Values.knowledge.extraSkills -}}
+{{- $_ := set $skills $name $body -}}
+{{- end -}}
+# Skills for HolmesGPT. ConfigMap keys cannot hold directories, so an init
+# container in the Holmes pod lays out <name>.md as <name>/SKILL.md.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-skills
+  labels: {{- include "aisre.labels" . | nindent 4 }}
+data:
+{{- range $name, $body := $skills }}
+  {{ $name }}.md: |
+{{ $body | indent 4 }}
+{{- end }}

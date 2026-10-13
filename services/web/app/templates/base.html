@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f5f6f8" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#11151c" media="(prefers-color-scheme: dark)">
+  <title>{% block title %}AI SRE{% endblock %} - Ventrolab AI SRE</title>
+  <link rel="icon" href="/static/icon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/htmx.min.js" defer></script>
+  <script src="/static/app.js" defer></script>
+</head>
+<body hx-headers='{"X-CSRF-Token": "{{ csrf }}"}'>
+<div class="layout">
+  {% if user %}
+  {# Narrow screens: a top bar with a menu button; the sidebar becomes a drawer (no JS needed). #}
+  <input type="checkbox" id="nav-toggle" class="nav-toggle" aria-hidden="true" tabindex="-1">
+  <header class="topbar">
+    <label for="nav-toggle" class="burger" aria-label="Menu"><span></span><span></span><span></span></label>
+    <a href="/" class="topbar-brand"><img src="/static/icon.svg" alt="" class="logo">AI SRE<span>{{ cfg.cluster_name }}</span></a>
+  </header>
+  <label for="nav-toggle" class="nav-backdrop" aria-hidden="true"></label>
+  <aside class="sidebar">
+    <div class="brand"><img src="/static/icon.svg" alt="" class="logo"><div>Ventrolab AI SRE<span>{{ cfg.cluster_name }}</span></div></div>
+    <nav class="nav">
+      <a href="/" class="{{ 'active' if active == 'dashboard' }}">Dashboard</a>
+      <a href="/incidents" class="{{ 'active' if active == 'incidents' }}">Incidents</a>
+      <a href="/approvals" class="{{ 'active' if active == 'approvals' }}">Approvals</a>
+      <a href="/targets" class="{{ 'active' if active == 'targets' }}">Targets</a>
+      {% if user.role in ('operator', 'admin') %}
+      <a href="/ask" class="{{ 'active' if active == 'ask' }}">Ask HolmesGPT</a>
+      {% endif %}
+      <div class="nav-section">Remediation</div>
+      <a href="/playbooks" class="{{ 'active' if active == 'playbooks' }}">Playbooks</a>
+      <a href="/knowledge" class="{{ 'active' if active == 'knowledge' }}">Knowledge base</a>
+      {% if user.role == 'admin' %}
+      <div class="nav-section">Administration</div>
+      <a href="/admin/users" class="{{ 'active' if active == 'users' }}">Users</a>
+      <a href="/admin/agents" class="{{ 'active' if active == 'agents' }}">Agents</a>
+      <a href="/admin/tokens" class="{{ 'active' if active == 'tokens' }}">API tokens</a>
+      <a href="/admin/audit" class="{{ 'active' if active == 'audit' }}">Audit log</a>
+      <a href="/admin/settings" class="{{ 'active' if active == 'settings' }}">Configuration</a>
+      {% endif %}
+    </nav>
+    <div class="me">
+      <div class="who">{{ user.display_name or user.username }}</div>
+      <div class="meta">{{ user.role }} &middot; {{ 'SSO' if user.source == 'oidc' else 'local' }}</div>
+      <form method="post" action="/logout"><input type="hidden" name="csrf" value="{{ csrf }}">
+        <button class="btn small" type="submit">Sign out</button></form>
+    </div>
+  </aside>
+  {% endif %}
+  <main id="content">
+    {% block content %}{% endblock %}
+  </main>
+</div>
+</body>
+</html>

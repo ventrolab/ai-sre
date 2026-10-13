@@ -1,0 +1,30 @@
+name: oom-low-limit
+description: >
+  The container needs more memory at startup than its limit allows and is OOMKilled every
+  time. A rolling restart (offered playbook for memory leaks) does not help.
+namespace: search
+steps:
+  - apply: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: {name: search-indexer}
+      spec:
+        replicas: 1
+        selector: {matchLabels: {app: search-indexer}}
+        template:
+          metadata: {labels: {app: search-indexer}}
+          spec:
+            containers:
+              - name: indexer
+                image: busybox:1.36.1
+                command: [sh, -c, 'echo "loading index into memory"; head -c 200m /dev/zero | tail']
+                resources: {requests: {cpu: 5m, memory: 16Mi}, limits: {memory: 24Mi}}
+    wait: {selector: app=search-indexer, reasons: [OOMKilled]}
+alert:
+  alertname: KubeContainerOOMKilled
+  labels: {container: indexer, severity: warning}
+  summary: Container {container} in pod {namespace}/{pod} has been OOMKilled.
+expect:
+  root_cause: [[oom, out of memory, memory limit], [limit, 24mi, 24 mi]]
+  playbook: null
+  min_confidence: 0.7

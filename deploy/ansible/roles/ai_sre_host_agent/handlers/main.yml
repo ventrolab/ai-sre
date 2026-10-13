@@ -1,0 +1,7 @@
+---
+- name: Restart ai-sre-host-agent
+  ansible.builtin.systemd_service:
+    name: ai-sre-host-agent
+    state: restarted
+    daemon_reload: true
+  when: ai_sre_host_agent_manage_service | bool

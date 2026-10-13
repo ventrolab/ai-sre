@@ -1,0 +1,48 @@
+image:
+  repository: ghcr.io/ventrolab/ai-sre/k8s-agent
+  # Empty: the chart appVersion (release charts carry the release version).
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# The hub tunnel: wss://<tunnel ingress host>/v1/tunnel (toolHub.tunnel.ingress, public
+# certificate), or wss://<address>:8443/v1/tunnel (the hub's TLS port, hub CA).
+hubURL: ""
+# Name checked in the hub certificate when hubURL uses an IP or another name.
+hubServerName: ""
+# How the agent authenticates: token (agent token, default) or mtls (client certificate;
+# the hub must allow it: toolHub.tunnel.auth mtls or both, reached on its TLS port).
+auth: token
+# The target name comes from the credential (the join token's name). Labels describe the cluster.
+labels: {}
+
+# Credentials, one of:
+# 1. Enrollment (recommended): a join token from the console (Administration -> Agents) or
+#    POST /api/v1/agents/enrollments. An init container enrolls once and keeps the credential
+#    in the Secret <release>-token (mtls: <release>-tls); later restarts reuse it. To
+#    re-enroll: delete that Secret and set a new token.
+#    caSha256 (from the same answer) pins the hub CA: required for mtls and when hubURL is
+#    the hub's own TLS port; leave it empty for an ingress with a public certificate.
+enrollment:
+  token: ""            # or existingSecret with the key "token"
+  existingSecret: ""
+  caSha256: ""
+# 2. A Secret with "token" (mtls: tls.crt, tls.key, ca.crt), optionally "ca.crt" for the hub CA;
+# 3. or the values below to create one.
+existingSecret: ""
+token: ""
+tls:
+  crt: ""
+  key: ""
+  ca: ""
+
+prometheus:
+  url: ""
+logBackends: []
+maxLogWindow: 24h
+# Write primitives for the Action Guard (adds write RBAC). Off by default.
+write:
+  enabled: false
+
+resources:
+  requests: {cpu: 20m, memory: 48Mi}
+  limits: {memory: 256Mi}

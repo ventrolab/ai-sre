@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Configuration{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Configuration</h1>
+<div class="sub">Effective settings. They come from the Helm values; change them there and upgrade the release.</div></div></div>
+<div class="grid half">
+  <div class="card"><h2>Remediation</h2>
+    {% if guard %}<dl class="kv small">
+      <dt>SRE_MODE</dt><dd>{{ guard.mode }}</dd><dt>AUTOFIX_MAX_RISK</dt><dd>{{ guard.autofix_max_risk }}</dd>
+      <dt>Actions per target per hour</dt><dd>{{ guard.autofix_max_actions_per_hour }}</dd>
+      <dt>Catalog</dt><dd class="mono">{{ guard.catalog_version }} ({{ guard.playbooks }} playbooks)</dd>
+      <dt>Catalog loaded</dt><dd>{{ guard.catalog_loaded_at }}</dd></dl>
+    {% else %}<div class="alert bad">Action Guard is unavailable.</div>{% endif %}
+    <p class="small muted">Values: <span class="mono">remediation.mode</span>, <span class="mono">remediation.maxRisk</span>, <span class="mono">remediation.maxActionsPerHour</span>.</p>
+  </div>
+  <div class="card"><h2>LLM and chat</h2><dl class="kv small">
+    <dt>LLM provider</dt><dd>{{ cfg.llm_provider or '-' }}</dd>
+    <dt>Fallbacks</dt><dd>{{ cfg.llm_fallbacks | join(', ') or 'none' }}</dd>
+    <dt>Chat adapters</dt><dd>{{ cfg.chat_adapters | join(', ') or '-' }}</dd>
+    <dt>Cluster</dt><dd>{{ cfg.cluster_name }}</dd></dl>
+    <p class="small muted">Values: <span class="mono">llm.provider</span>, <span class="mono">llm.fallbacks</span>, <span class="mono">chat.adapters</span>.</p>
+  </div>
+  <div class="card"><h2>Authentication</h2><dl class="kv small">
+    <dt>Local accounts</dt><dd><span class="badge {{ 'ok' if cfg.local_auth else '' }}">{{ 'enabled' if cfg.local_auth else 'disabled' }}</span></dd>
+    <dt>SSO (OIDC)</dt><dd><span class="badge {{ 'ok' if cfg.oidc_enabled else '' }}">{{ 'enabled' if cfg.oidc_enabled else 'disabled' }}</span></dd>
+    {% if cfg.oidc_enabled %}
+    <dt>Issuer</dt><dd class="mono">{{ cfg.oidc_issuer }}</dd><dt>Client</dt><dd class="mono">{{ cfg.oidc_client_id }}</dd>
+    <dt>Role claim</dt><dd class="mono">{{ cfg.oidc_roles_claim }}</dd>
+    <dt>Role mapping</dt><dd class="mono">{% for g, r in cfg.oidc_role_mapping.items() %}{{ g }} -> {{ r }}<br>{% endfor %}</dd>
+    <dt>Without group</dt><dd>{{ cfg.oidc_default_role or 'access denied' }}</dd>
+    {% endif %}
+    <dt>Session lifetime</dt><dd>{{ (cfg.session_max_age / 3600) | round(1) }} h</dd></dl>
+    <p class="small muted">To use SSO only, set <span class="mono">web.auth.local.enabled=false</span>. Local accounts stay in the database but cannot sign in.</p>
+  </div>
+  <div class="card"><h2>About</h2><dl class="kv small"><dt>Version</dt><dd class="mono">{{ cfg.version }}</dd>
+    <dt>Base URL</dt><dd class="mono">{{ cfg.base_url }}</dd></dl></div>
+</div>
+{% endblock %}

@@ -1,0 +1,85 @@
+{{- $name := printf "%s-litellm" .Release.Name -}}
+{{- $models := .Values.llm.models -}}
+{{- if not (hasKey $models .Values.llm.provider) -}}
+{{- fail (printf "llm.provider %q is not a key of llm.models" .Values.llm.provider) -}}
+{{- end -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+  labels: {{- include "aisre.labels" . | nindent 4 }}
+data:
+  config.yaml: |
+    model_list:
+      - model_name: default
+        litellm_params: {{- toYaml (index $models .Values.llm.provider) | nindent 10 }}
+    {{- range $fb := .Values.llm.fallbacks }}
+      - model_name: {{ $fb }}
+        litellm_params: {{- toYaml (index $models $fb) | nindent 10 }}
+    {{- end }}
+    litellm_settings:
+      drop_params: true
+      request_timeout: 600
+      {{- with .Values.llm.fallbacks }}
+      fallbacks:
+        - default: {{ toJson . }}
+      {{- end }}
+    general_settings:
+      master_key: os.environ/LITELLM_MASTER_KEY
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels: {{- include "aisre.labels" . | nindent 4 }}
+    app.kubernetes.io/name: litellm
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "aisre.selector" (dict "root" . "name" "litellm") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "aisre.selector" (dict "root" . "name" "litellm") | nindent 8 }}
+      annotations:
+        checksum/config: {{ toYaml .Values.llm | sha256sum }}
+    spec:
+      {{- include "aisre.scheduling" $ | nindent 6 }}
+      containers:
+        - name: litellm
+          image: {{ .Values.litellm.image }}
+          args: ["--config", "/etc/litellm/config.yaml", "--port", "4000", "--num_workers", "1"]
+          env:
+            - name: LITELLM_MASTER_KEY
+              valueFrom:
+                secretKeyRef: {name: {{ .Release.Name }}-secrets, key: LITELLM_MASTER_KEY}
+            - name: LITELLM_TELEMETRY
+              value: "False"
+          {{- with .Values.llm.existingSecret }}
+          envFrom:
+            - secretRef: {name: {{ . }}, optional: true}
+          {{- end }}
+          ports:
+            - {name: http, containerPort: 4000}
+          readinessProbe:
+            httpGet: {path: /health/readiness, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health/liveliness, port: http}
+            initialDelaySeconds: 30
+            periodSeconds: 30
+          resources: {{- toYaml .Values.litellm.resources | nindent 12 }}
+          volumeMounts:
+            - {name: config, mountPath: /etc/litellm}
+      volumes:
+        - name: config
+          configMap: {name: {{ $name }}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels: {{- include "aisre.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "aisre.selector" (dict "root" . "name" "litellm") | nindent 4 }}
+  ports:
+    - {name: http, port: 4000, targetPort: http}

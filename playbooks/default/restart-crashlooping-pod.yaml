@@ -1,0 +1,25 @@
+apiVersion: ai-sre.io/v1
+kind: Playbook
+metadata:
+  name: restart-crashlooping-pod
+spec:
+  enabled: true
+  description: Delete a crash-looping pod so its controller recreates it
+  risk: low
+  match:
+    alertnames: [KubePodCrashLooping]
+    targetKind: k8s.pod
+  action:
+    primitive: k8s.pod.delete
+    params:
+      namespace: "{{ target.namespace }}"
+      pod: "{{ target.pod }}"
+  precheck:
+    - primitive: k8s.pod.ownerExists
+  verify:
+    promql: >
+      increase(kube_pod_container_status_restarts_total{namespace="{{ target.namespace }}",pod=~"{{ target.workload }}-.*"}[5m]) == 0
+    timeout: 10m
+  rollback: none
+  limits:
+    maxPerTargetPerHour: 3

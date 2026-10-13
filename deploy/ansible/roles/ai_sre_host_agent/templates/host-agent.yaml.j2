@@ -1,0 +1,28 @@
+# Managed by Ansible (role ai_sre_host_agent).
+hubURL: {{ ai_sre_hub_url | to_json }}
+labels: {{ ai_sre_host_agent_labels | to_json }}
+{% set dir = ai_sre_host_agent_credentials_dir %}
+{% set mtls = ai_sre_agent_auth == 'mtls' %}
+auth: {{ ai_sre_agent_auth | to_json }}
+{% if not mtls %}
+tokenFile: {{ (dir ~ '/token') | to_json }}
+{% endif %}
+tls:
+{% if mtls or ai_sre_hub_ca_pinned | bool %}
+  ca: {{ (dir ~ '/ca.crt') | to_json }}
+{% endif %}
+{% if mtls %}
+  cert: {{ (dir ~ '/tls.crt') | to_json }}
+  key: {{ (dir ~ '/tls.key') | to_json }}
+{% endif %}
+{% if ai_sre_hub_server_name %}
+  serverName: {{ ai_sre_hub_server_name | to_json }}
+{% endif %}
+healthAddr: 127.0.0.1:8081
+maxLogWindow: {{ ai_sre_host_agent_max_log_window | to_json }}
+logFiles: {{ ai_sre_host_agent_log_files | to_json }}
+commands: {{ ai_sre_host_agent_commands | to_json }}
+write:
+  enabled: {{ ai_sre_host_agent_write_enabled | bool | to_json }}
+  systemctl: {{ ai_sre_host_agent_write_systemctl | to_json }}
+  cleanPaths: {{ ai_sre_host_agent_write_clean_paths | to_json }}

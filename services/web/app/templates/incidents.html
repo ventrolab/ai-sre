@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% from "macros.html" import status_badge, confidence, target %}
+{% block title %}Incidents{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div><h1>Incidents</h1><div class="sub">Alerts about the same object are grouped into one incident.</div></div>
+  <form class="row" method="get" action="/incidents">
+    <input type="hidden" name="status" value="{{ status }}">
+    <input name="q" value="{{ q }}" placeholder="Search title, key or id">
+    <button class="btn" type="submit">Search</button>
+  </form>
+</div>
+<div class="filters" style="margin-bottom:14px">
+  {% for key, label in [('open', 'Open'), ('awaiting_approval', 'Awaiting approval'), ('investigation_failed', 'Failed'), ('resolved', 'Resolved'), ('all', 'All')] %}
+  <a href="/incidents?status={{ key }}&q={{ q | urlencode }}" class="{{ 'on' if status == key }}">{{ label }}</a>
+  {% endfor %}
+</div>
+<div class="card">
+  <table>
+    <tr><th>Incident</th><th>Target</th><th>Status</th><th class="num">Alerts</th><th class="num">Confidence</th><th>Playbook</th><th class="num">Opened</th><th class="num">Updated</th></tr>
+    {% for i in rows %}
+    <tr>
+      <td><a href="/incidents/{{ i.id }}">{{ i.title }}</a><div class="mono small muted">{{ i.id[:8] }}</div></td>
+      <td>{{ target(i.target) }}<div class="small muted">{{ i.target.cluster }}</div></td>
+      <td>{{ status_badge(i.status) }}</td>
+      <td class="num">{{ i.alert_count }}</td>
+      <td class="num">{{ confidence(i.confidence) }}</td>
+      <td class="mono small">{{ i.playbook or '-' }}</td>
+      <td class="num small muted nowrap">{{ i.created_at | ago }}</td>
+      <td class="num small muted nowrap">{{ i.updated_at | ago }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="8" class="muted">No incidents match.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+<div class="row" style="margin-top:12px">
+  {% if page > 1 %}<a class="btn small" href="/incidents?status={{ status }}&q={{ q | urlencode }}&page={{ page - 1 }}">Previous</a>{% endif %}
+  {% if rows | length == 50 %}<a class="btn small" href="/incidents?status={{ status }}&q={{ q | urlencode }}&page={{ page + 1 }}">Next</a>{% endif %}
+</div>
+{% endblock %}

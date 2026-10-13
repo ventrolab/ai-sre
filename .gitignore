@@ -1,0 +1,12 @@
+.venv/
+.last-tag
+**/__pycache__/
+**/.pytest_cache/
+charts/*/charts/
+charts/*/Chart.lock
+# archify build evidence next to docs/architecture.html: keep the diagram and its source
+docs/architecture.*.json
+.kube/
+dist/
+**/*.egg-info/
+evals/results/

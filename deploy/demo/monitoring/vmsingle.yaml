@@ -1,0 +1,18 @@
+# VictoriaMetrics single node for the demo: no persistence, short retention.
+server:
+  retentionPeriod: 1d
+  persistentVolume:
+    enabled: false
+  scrape:
+    # The chart's default scrape config covers the API server, kubelets, cAdvisor and
+    # endpoints annotated with prometheus.io/scrape.
+    enabled: true
+    extraScrapeConfigs:
+      # kube-state-metrics describes other objects: keep its namespace/pod labels.
+      - job_name: kube-state-metrics
+        honor_labels: true
+        static_configs:
+          - targets: [kube-state-metrics.monitoring.svc:8080]
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {memory: 512Mi}

@@ -1,0 +1,28 @@
+name: job-failed
+description: >
+  A one-off migration Job fails because its database host does not resolve. Deleting the
+  Job (offered playbook, meant for CronJob runs) does not fix it; the playbook is not scored.
+namespace: inventory
+steps:
+  - apply: |
+      apiVersion: batch/v1
+      kind: Job
+      metadata: {name: inventory-migrate}
+      spec:
+        backoffLimit: 1
+        template:
+          spec:
+            restartPolicy: Never
+            containers:
+              - name: migrate
+                image: busybox:1.36.1
+                command: [sh, -c, 'echo "running migrations against inventory-db.inventory.svc:5432"; nslookup inventory-db.inventory.svc >/dev/null 2>&1 || { echo "ERROR: could not resolve host inventory-db.inventory.svc" >&2; exit 3; }']
+                resources: {requests: {cpu: 5m, memory: 8Mi}, limits: {memory: 32Mi}}
+    wait: {job: inventory-migrate, condition: Failed}
+alert:
+  alertname: KubeJobFailed
+  labels: {severity: warning}
+  summary: Job {namespace}/{job} failed to complete.
+expect:
+  root_cause: [[inventory-db, database, db host], [resolve, dns, nslookup, exist, no service, not found, missing]]
+  min_confidence: 0.6

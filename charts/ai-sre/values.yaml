@@ -1,0 +1,332 @@
+# Ventrolab AI SRE. See ARCHITECTURE.md for the design.
+#
+# Names of a few generated objects depend on the release name. The defaults
+# below assume the release is called "ai-sre"; with another name, adjust
+# holmes.extraEnvVarsSecrets, holmes.modelList.default.api_base and nats.
+
+# community: the open-source images. enterprise: the images of the enterprise edition from
+# image.enterpriseRegistry (credentials in imagePullSecrets) with the license in
+# license.existingSecret.
+edition: community
+
+image:
+  registry: ghcr.io/ventrolab/ai-sre
+  # Registry of the enterprise images (edition: enterprise).
+  enterpriseRegistry: ""
+  # Empty: the chart appVersion (release charts carry the release version).
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# Pull secrets for the images of this chart, e.g. [{name: ventrolab-registry}].
+imagePullSecrets: []
+
+license:
+  # Secret with the key "license" (the license token). Read by the enterprise edition;
+  # the community edition ignores it.
+  existingSecret: ""
+
+# Name of the cluster this installation runs in; used for alerts without a
+# cluster label.
+clusterName: local
+
+remediation:
+  # readonly: actions are only proposed. autofix: low-risk playbooks run
+  # automatically, others need approval in chat.
+  mode: readonly
+  maxRisk: low
+  maxActionsPerHour: 5
+  approvalTTLSeconds: 3600
+  playbooks:
+    # Ship the default catalog from files/playbooks.
+    includeDefault: true
+    # Extra or overriding playbooks: file name -> YAML. A key equal to a
+    # default file name replaces that file.
+    extra: {}
+    # Use an existing ConfigMap instead (for GitOps-managed catalogs).
+    existingConfigMap: ""
+
+llm:
+  # Entry of llm.models served to HolmesGPT as the model "default".
+  provider: vllm
+  # Other entries of llm.models tried in order when the provider fails.
+  fallbacks: []
+  # Secret with provider credentials as env vars, e.g. ANTHROPIC_API_KEY,
+  # OPENAI_API_KEY, VLLM_API_KEY. Referenced from models as os.environ/NAME.
+  existingSecret: ""
+  # additional_drop_params removes request parameters a backend rejects:
+  # current Claude models refuse sampling parameters, and HolmesGPT asks for
+  # more output tokens than small self-hosted models allow.
+  models:
+    claude:
+      model: anthropic/claude-sonnet-5-5
+      api_key: os.environ/ANTHROPIC_API_KEY
+      additional_drop_params: [temperature, top_p]
+    openai:
+      model: openai/gpt-5
+      api_key: os.environ/OPENAI_API_KEY
+    vllm:
+      model: hosted_vllm/qwen3-8b
+      api_base: http://vllm:8000/v1
+      api_key: os.environ/VLLM_API_KEY
+      additional_drop_params: [max_tokens]
+    ollama:
+      model: ollama_chat/qwen3:8b
+      api_base: http://ollama:11434
+      additional_drop_params: [max_tokens]
+
+litellm:
+  image: ghcr.io/berriai/litellm:main-v1.83.10-stable
+  resources:
+    requests: {cpu: 100m, memory: 384Mi}
+    limits: {memory: 1Gi}
+
+chat:
+  # Comma-separated adapters: telegram, console.
+  adapters: console
+  telegram:
+    # Secret with TELEGRAM_BOT_TOKEN. It may also hold TELEGRAM_CHAT_IDS,
+    # TELEGRAM_THREAD_ID and TELEGRAM_APPROVERS instead of the values below.
+    existingSecret: ""
+    # Chats that receive notifications and may send commands.
+    chatIds: ""
+    # Forum topic (message_thread_id) to post to and listen in.
+    threadId: ""
+    # Telegram user ids allowed to approve actions with chat buttons (enterprise edition;
+    # the community edition takes approvals in the web console only).
+    approvers: ""
+
+knowledge:
+  # Ship the skills from files/skills (the repository's skills/ directory).
+  includeDefault: true
+  # Extra or overriding skills: name -> SKILL.md content with frontmatter.
+  extraSkills: {}
+
+# Scheduled health checks: each becomes a CronJob posting to ingest.
+checks: []
+#  - name: pods-healthy
+#    schedule: "0 */6 * * *"
+#    query: Are all pods in all namespaces running without frequent restarts?
+
+web:
+  enabled: true
+  # External URL of the console; OIDC redirect URIs are built from it.
+  baseUrl: http://localhost:8080
+  # Secure cookies need HTTPS in front of the console.
+  secureCookies: false
+  sessionMaxAgeSeconds: 43200
+  service:
+    type: ClusterIP
+    nodePort: null
+  ingress:
+    enabled: false
+    className: nginx
+    host: ""
+    annotations: {}
+    tlsSecretName: ""
+  auth:
+    local:
+      # false: only SSO; local accounts stay in the database but cannot sign in.
+      enabled: true
+      # The first admin, created when no local account exists. The password is
+      # generated into the Secret <release>-web unless existingSecret holds
+      # WEB_ADMIN_PASSWORD.
+      adminUser: admin
+    oidc:
+      enabled: false
+      displayName: SSO
+      issuerUrl: ""
+      clientId: ai-sre-web
+      # Secret with OIDC_CLIENT_SECRET.
+      existingSecret: ""
+      scopes: openid profile email
+      # Claim with groups or roles; dots walk nested claims (realm_access.roles).
+      rolesClaim: groups
+      # Identity provider group or role -> console role (viewer, operator, admin).
+      roleMapping:
+        ai-sre-admins: admin
+        ai-sre-operators: operator
+        ai-sre-viewers: viewer
+      # Role for users without a mapped group; empty denies access.
+      defaultRole: ""
+  resources:
+    requests: {cpu: 20m, memory: 96Mi}
+    limits: {memory: 384Mi}
+
+# Placement of every workload of this chart. The nats and holmes subcharts take their
+# own values (nats.podTemplate.merge.spec, holmes.nodeSelector/tolerations).
+scheduling:
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+toolHub:
+  enabled: true
+  callTimeout: 60s
+  # Tool output above this size is cut before it reaches the LLM.
+  maxOutputBytes: 30000
+  tunnel:
+    # How agents authenticate: token (an agent token issued at enrollment, the default),
+    # mtls (client certificates; TLS must reach the hub, so remote agents need a Service or
+    # TLS passthrough), or both (e.g. while moving agents from certificates to tokens).
+    auth: token
+    # Agents outside the cluster with tokens: an ingress that terminates TLS (public
+    # certificate) and exposes only /v1/tunnel and /v1/enroll. publicUrl: wss://<host>.
+    ingress:
+      enabled: false
+      className: nginx
+      host: ""
+      annotations: {}
+      tlsSecretName: ""
+    # Or the hub's own TLS port 8443 (hub CA; agents pin its SHA-256). Required for mtls.
+    service:
+      type: ClusterIP   # NodePort or LoadBalancer for remote agents
+      nodePort: null
+    # Extra names/IPs in the hub certificate, as agents dial them.
+    dnsNames: []
+    ipAddresses: []
+    # Gateway API TLS passthrough route to port 8443 (mtls through a Gateway; the listener
+    # must use protocol TLS, mode Passthrough). Not needed for tokens: use ingress.
+    gatewayRoute:
+      enabled: false
+      apiVersion: gateway.networking.k8s.io/v1   # v1alpha2 on older Gateway API
+      hostnames: []                              # e.g. [agent.example.com]
+      parentRefs: []                             # e.g. [{name: public, namespace: gateway, sectionName: tls-agents}]
+  # Address agents outside the cluster dial (wss://host[:port]), shown in enrollment commands.
+  publicUrl: ""
+  enrollment:
+    # Validity of certificates issued with join tokens (mtls).
+    certDays: 365
+  resources:
+    requests: {cpu: 20m, memory: 32Mi}
+    limits: {memory: 256Mi}
+
+# k8s-agent for this cluster, connected to the hub like any remote one.
+localAgent:
+  enabled: true
+  labels: {}
+  prometheus:
+    url: ""
+  logBackends: []
+  # Write primitives for autofix and approved actions (adds write RBAC).
+  write:
+    enabled: false
+  resources:
+    requests: {cpu: 20m, memory: 48Mi}
+    limits: {memory: 256Mi}
+
+ingest:
+  replicas: 1
+  resources:
+    requests: {cpu: 20m, memory: 64Mi}
+    limits: {memory: 256Mi}
+
+controller:
+  maxParallelInvestigations: 2
+  holmesTimeoutSeconds: 900
+  resources:
+    requests: {cpu: 20m, memory: 96Mi}
+    limits: {memory: 384Mi}
+
+chatGateway:
+  resources:
+    requests: {cpu: 10m, memory: 64Mi}
+    limits: {memory: 256Mi}
+
+actionGuard:
+  resources:
+    requests: {cpu: 10m, memory: 24Mi}
+    limits: {memory: 128Mi}
+
+postgres:
+  image: pgvector/pgvector:0.8.0-pg16
+  storageClassName: ""
+  size: 5Gi
+  resources:
+    requests: {cpu: 50m, memory: 128Mi}
+    limits: {memory: 512Mi}
+
+nats:
+  enabled: true
+  config:
+    jetstream:
+      enabled: true
+      fileStore:
+        pvc:
+          size: 2Gi
+  natsBox:
+    enabled: false
+  container:
+    merge:
+      resources:
+        requests: {cpu: 20m, memory: 64Mi}
+        limits: {memory: 256Mi}
+
+holmes:
+  enabled: true
+  enableTelemetry: false
+  extraEnvVarsSecrets:
+    - ai-sre-llm-client
+    - ai-sre-tool-hub-token
+  # Tool Hub: remote clusters, hosts and log backends through agents.
+  mcp_servers:
+    ai-sre-tools:
+      description: >-
+        AI SRE Tool Hub: Kubernetes objects, events and logs, metrics and centralized
+        logs (Loki, VictoriaLogs, Elasticsearch/OpenSearch) of every connected cluster,
+        and diagnostics of standalone hosts. Call list_targets first, then pass target.
+      config:
+        mode: streamable-http
+        url: http://ai-sre-tool-hub:8080/mcp
+        headers:
+          Authorization: "Bearer {{ env.TOOL_HUB_TOKEN }}"
+  modelList:
+    default:
+      model: openai/default
+      api_base: http://ai-sre-litellm:4000
+      api_key: envRef:LITELLM_API_KEY
+  toolsets:
+    kubernetes/core:
+      enabled: true
+    kubernetes/logs:
+      enabled: true
+    prometheus/metrics:
+      enabled: false
+    robusta:
+      enabled: false
+    internet:
+      enabled: false
+    bash:
+      enabled: false
+    skills:
+      enabled: true
+    connectivity_check:
+      enabled: false
+  # Skills from the ConfigMap ai-sre-skills (templates/skills.yaml).
+  customSkillPaths:
+    - /etc/ai-sre/skills
+  initContainers:
+    - name: skills-layout
+      image: busybox:1.36.1
+      command:
+        - sh
+        - -c
+        - for f in /cm/*.md; do n=$(basename "$f" .md); mkdir -p "/skills/$n"; cp "$f" "/skills/$n/SKILL.md"; done
+      volumeMounts:
+        - {name: skills-cm, mountPath: /cm, readOnly: true}
+        - {name: skills, mountPath: /skills}
+      resources:
+        requests: {cpu: 10m, memory: 8Mi}
+        limits: {memory: 32Mi}
+  additionalVolumes:
+    - name: skills-cm
+      configMap:
+        name: ai-sre-skills
+    - name: skills
+      emptyDir: {}
+  additionalVolumeMounts:
+    - {name: skills, mountPath: /etc/ai-sre/skills, readOnly: true}
+  # Kubernetes listing tools load every object of a kind before filtering,
+  # so memory spikes on bigger clusters.
+  resources:
+    requests: {cpu: 100m, memory: 768Mi}
+    limits: {memory: 2Gi}

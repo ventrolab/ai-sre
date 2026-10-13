@@ -1,0 +1,168 @@
+{{- if .Values.web.enabled }}
+{{- $name := printf "%s-web" .Release.Name -}}
+{{- $w := .Values.web -}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}
+  labels: {{- include "aisre.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  WEB_SESSION_SECRET: {{ include "aisre.secretValue" (dict "root" . "secret" $name "key" "WEB_SESSION_SECRET") | quote }}
+  WEB_ADMIN_PASSWORD: {{ include "aisre.secretValue" (dict "root" . "secret" $name "key" "WEB_ADMIN_PASSWORD") | quote }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels: {{- include "aisre.labels" . | nindent 4 }}
+    app.kubernetes.io/name: web
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {{- include "aisre.selector" (dict "root" . "name" "web") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "aisre.selector" (dict "root" . "name" "web") | nindent 8 }}
+      annotations:
+        checksum/config: {{ toYaml $w | sha256sum }}
+    spec:
+      enableServiceLinks: false
+      {{- include "aisre.scheduling" $ | nindent 6 }}
+      containers:
+        - name: web
+          image: {{ include "aisre.image" (dict "root" . "name" "web") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            {{- include "aisre.licenseEnv" . | nindent 12 }}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: {{ .Release.Name }}-secrets, key: POSTGRES_PASSWORD}
+            - name: DATABASE_URL
+              value: postgresql://aisre:$(POSTGRES_PASSWORD)@{{ .Release.Name }}-postgres:5432/aisre
+            - {name: NATS_URL, value: {{ include "aisre.natsUrl" . | quote }}}
+            - {name: INGEST_URL, value: {{ include "aisre.ingestUrl" . | quote }}}
+            - name: INGEST_TOKEN
+              valueFrom:
+                secretKeyRef: {name: {{ .Release.Name }}-secrets, key: INGEST_TOKEN}
+            - {name: ACTION_GUARD_URL, value: {{ include "aisre.guardUrl" . | quote }}}
+            - {name: HOLMES_URL, value: "http://{{ .Release.Name }}-holmes:80"}
+            - {name: LITELLM_URL, value: "http://{{ .Release.Name }}-litellm:4000"}
+            {{- if .Values.toolHub.enabled }}
+            {{- /* Read token only: the Targets page lists agents; the action token stays with the guard. */}}
+            - {name: TOOL_HUB_URL, value: "http://{{ .Release.Name }}-tool-hub:8080"}
+            - {name: TOOL_HUB_PUBLIC_URL, value: {{ .Values.toolHub.publicUrl | quote }}}
+            - {name: TOOL_HUB_CA_FILE, value: /etc/ai-sre/hub-ca/ca.crt}
+            - {name: TOOL_HUB_AUTH, value: {{ .Values.toolHub.tunnel.auth | quote }}}
+            # publicUrl is the tunnel ingress (public certificate) or the hub's TLS port (hub CA).
+            - {name: TOOL_HUB_PUBLIC_CA, value: {{ ternary "system" "hub" .Values.toolHub.tunnel.ingress.enabled | quote }}}
+            - name: TOOL_HUB_TOKEN
+              valueFrom:
+                secretKeyRef: {name: {{ .Release.Name }}-tool-hub-token, key: TOOL_HUB_TOKEN}
+            {{- end }}
+            - {name: WEB_BASE_URL, value: {{ $w.baseUrl | quote }}}
+            - {name: WEB_SECURE_COOKIES, value: {{ $w.secureCookies | quote }}}
+            - {name: WEB_SESSION_MAX_AGE, value: {{ $w.sessionMaxAgeSeconds | quote }}}
+            - {name: AUTH_LOCAL_ENABLED, value: {{ $w.auth.local.enabled | quote }}}
+            - {name: WEB_ADMIN_USER, value: {{ $w.auth.local.adminUser | quote }}}
+            - {name: AUTH_OIDC_ENABLED, value: {{ $w.auth.oidc.enabled | quote }}}
+            {{- if $w.auth.oidc.enabled }}
+            - {name: OIDC_DISPLAY_NAME, value: {{ $w.auth.oidc.displayName | quote }}}
+            - {name: OIDC_ISSUER_URL, value: {{ required "web.auth.oidc.issuerUrl is required" $w.auth.oidc.issuerUrl | quote }}}
+            - {name: OIDC_CLIENT_ID, value: {{ $w.auth.oidc.clientId | quote }}}
+            - {name: OIDC_SCOPES, value: {{ $w.auth.oidc.scopes | quote }}}
+            - {name: OIDC_ROLES_CLAIM, value: {{ $w.auth.oidc.rolesClaim | quote }}}
+            - name: OIDC_ROLE_MAPPING
+              value: {{ $pairs := list }}{{ range $g, $r := $w.auth.oidc.roleMapping }}{{ $pairs = append $pairs (printf "%s=%s" $g $r) }}{{ end }}{{ join "," $pairs | quote }}
+            - {name: OIDC_DEFAULT_ROLE, value: {{ $w.auth.oidc.defaultRole | quote }}}
+            {{- end }}
+            - {name: PLAYBOOKS_PATH, value: /etc/ai-sre/playbooks}
+            - {name: SKILLS_PATH, value: /etc/ai-sre/skills}
+            - {name: CLUSTER_NAME, value: {{ .Values.clusterName | quote }}}
+            - {name: LLM_PROVIDER, value: {{ .Values.llm.provider | quote }}}
+            - {name: LLM_FALLBACKS, value: {{ join "," .Values.llm.fallbacks | quote }}}
+            - {name: CHAT_ADAPTERS, value: {{ .Values.chat.adapters | quote }}}
+            - {name: APP_VERSION, value: {{ .Values.image.tag | default .Chart.AppVersion | quote }}}
+          envFrom:
+            - secretRef: {name: {{ $name }}}
+            {{- with $w.auth.oidc.existingSecret }}
+            - secretRef: {name: {{ . }}, optional: true}
+            {{- end }}
+          ports:
+            - {name: http, containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            initialDelaySeconds: 15
+            periodSeconds: 30
+          resources: {{- toYaml $w.resources | nindent 12 }}
+          securityContext: {{- include "aisre.securityContext" . | nindent 12 }}
+          volumeMounts:
+            - {name: playbooks, mountPath: /etc/ai-sre/playbooks, readOnly: true}
+            - {name: skills, mountPath: /etc/ai-sre/skills, readOnly: true}
+            - {name: tmp, mountPath: /tmp}
+            {{- if .Values.toolHub.enabled }}
+            - {name: hub-ca, mountPath: /etc/ai-sre/hub-ca, readOnly: true}
+            {{- end }}
+      volumes:
+        {{- if .Values.toolHub.enabled }}
+        # Public CA certificate only: the console shows its SHA-256 for agent enrollment.
+        - name: hub-ca
+          secret:
+            secretName: {{ .Release.Name }}-tool-hub-tls
+            items: [{key: ca.crt, path: ca.crt}]
+        {{- end }}
+        - name: playbooks
+          configMap:
+            name: {{ .Values.remediation.playbooks.existingConfigMap | default (printf "%s-playbooks" .Release.Name) }}
+        - name: skills
+          configMap: {name: {{ .Release.Name }}-skills}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels: {{- include "aisre.labels" . | nindent 4 }}
+spec:
+  type: {{ $w.service.type }}
+  selector: {{- include "aisre.selector" (dict "root" . "name" "web") | nindent 4 }}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+      {{- if and (eq $w.service.type "NodePort") $w.service.nodePort }}
+      nodePort: {{ $w.service.nodePort }}
+      {{- end }}
+{{- if $w.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $name }}
+  labels: {{- include "aisre.labels" . | nindent 4 }}
+  {{- with $w.ingress.annotations }}
+  annotations: {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ $w.ingress.className }}
+  {{- with $w.ingress.tlsSecretName }}
+  tls:
+    - hosts: [{{ $w.ingress.host | quote }}]
+      secretName: {{ . }}
+  {{- end }}
+  rules:
+    - host: {{ required "web.ingress.host is required" $w.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $name }}
+                port: {name: http}
+{{- end }}
+{{- end }}

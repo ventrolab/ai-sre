@@ -1,0 +1,184 @@
+# Release on a version tag:  git tag v0.2.0 && git push origin v0.2.0
+#   - images        ghcr.io/<owner>/ai-sre/<service>:<version> (amd64+arm64, SBOM, provenance, cosign)
+#   - binaries      host-agent and k8s-agent for linux/amd64 and linux/arm64, the aisre CLI for
+#                   linux and darwin (amd64, arm64), SHA256SUMS
+#   - charts        oci://ghcr.io/<owner>/ai-sre/charts/{ai-sre,k8s-agent}:<version>
+#   - OCI artifacts ghcr.io/<owner>/ai-sre/{host-agent,k8s-agent,aisre}-bin:<version> (oras), pullable when the
+#                   repository itself is private but the package is public
+#   - GitHub Release with all files and generated notes (pre-release for versions with "-")
+name: release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: read
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - id: v
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "not a semver tag: $GITHUB_REF_NAME"; exit 1; }
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+
+  images:
+    needs: version
+    uses: ./.github/workflows/images.yml
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    with:
+      push: true
+      version: ${{ needs.version.outputs.version }}
+
+  binaries:
+    needs: version
+    runs-on: ubuntu-24.04
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build
+        run: |
+          mkdir -p dist
+          for arch in amd64 arm64; do
+            for agent in host-agent k8s-agent; do
+              out="build/ai-sre-$agent-$VERSION-linux-$arch"
+              mkdir -p "$out"
+              CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath \
+                -ldflags="-s -w -X main.version=$VERSION" -o "$out/ai-sre-$agent" ./agents/$agent
+              cp LICENSE "$out/" 2>/dev/null || true
+              if [ "$agent" = host-agent ]; then
+                cp agents/host-agent/README.md agents/host-agent/packaging/* "$out/"
+              fi
+              tar -C build -czf "dist/$(basename "$out").tar.gz" "$(basename "$out")"
+            done
+          done
+          # CLI for workstations: Linux and macOS.
+          for os in linux darwin; do
+            for arch in amd64 arm64; do
+              out="build/aisre-$VERSION-$os-$arch"
+              mkdir -p "$out"
+              CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath \
+                -ldflags="-s -w -X main.version=$VERSION" -o "$out/aisre" ./cli/aisre
+              cp LICENSE cli/aisre/README.md "$out/"
+              tar -C build -czf "dist/$(basename "$out").tar.gz" "$(basename "$out")"
+            done
+          done
+          (cd dist && sha256sum -- *.tar.gz > SHA256SUMS-binaries)
+          ls -l dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries
+          path: dist/*
+
+  charts:
+    needs: version
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: Package
+        run: |
+          helm dependency update charts/ai-sre
+          mkdir -p dist
+          for c in ai-sre k8s-agent; do
+            helm package "charts/$c" --version "$VERSION" --app-version "$VERSION" -d dist
+          done
+          (cd dist && sha256sum -- *.tgz > SHA256SUMS-charts)
+      - name: Push to GHCR
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+          for f in dist/*.tgz; do helm push "$f" "oci://ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/ai-sre/charts"; done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: charts
+          path: dist/*
+
+  oci-binaries:
+    needs: [version, binaries]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: binaries
+          path: dist
+      - uses: oras-project/setup-oras@v1
+      - name: Push agent and CLI binaries
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u "${{ github.actor }}" --password-stdin
+          cd dist
+          for agent in host-agent k8s-agent aisre; do
+            ref="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/ai-sre/$agent-bin"
+            prefix="ai-sre-$agent-$VERSION"; [ "$agent" = aisre ] && prefix="aisre-$VERSION"
+            layers=()
+            for f in "$prefix"-*.tar.gz; do layers+=("$f:application/gzip"); done
+            oras push "$ref:$VERSION" --artifact-type application/vnd.ai-sre.agent.v1 "${layers[@]}"
+            case "$VERSION" in *-*) ;; *) oras tag "$ref:$VERSION" latest ;; esac
+          done
+
+  release:
+    needs: [version, images, binaries, charts, oci-binaries]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      # Only our artifacts: the image jobs also leave *.dockerbuild build records.
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: "{binaries,charts}"
+          path: dist
+          merge-multiple: true
+      - name: Notes
+        run: |
+          owner="${GITHUB_REPOSITORY_OWNER,,}"
+          cat > notes.md <<NOTES
+          ## Install
+
+          Images: \`ghcr.io/$owner/ai-sre/<service>:$VERSION\` (linux/amd64, linux/arm64; signed with cosign keyless).
+
+          \`\`\`
+          helm install ai-sre oci://ghcr.io/$owner/ai-sre/charts/ai-sre --version $VERSION -n ai-sre --create-namespace
+          helm install ai-sre-agent oci://ghcr.io/$owner/ai-sre/charts/k8s-agent --version $VERSION -n ai-sre \\
+            --set hubURL=wss://<tunnel ingress host>/v1/tunnel --set enrollment.token=<join token>
+          \`\`\`
+
+          Host agent: \`ai-sre-host-agent-$VERSION-linux-<arch>.tar.gz\` below, or
+          \`oras pull ghcr.io/$owner/ai-sre/host-agent-bin:$VERSION\`; enrollment and the Ansible
+          role: \`agents/host-agent/README.md\`, \`deploy/ansible\`.
+
+          CLI: \`aisre-$VERSION-<linux|darwin>-<amd64|arm64>.tar.gz\` below, or
+          \`oras pull ghcr.io/$owner/ai-sre/aisre-bin:$VERSION\`; then \`aisre login --url https://<console>\`
+          with an API token (scope \`status:read\`) and \`aisre status\`.
+
+          Verify an image: \`cosign verify ghcr.io/$owner/ai-sre/web:$VERSION --certificate-identity-regexp 'https://github.com/$GITHUB_REPOSITORY/' --certificate-oidc-issuer https://token.actions.githubusercontent.com\`
+          NOTES
+      - name: Create release
+        run: |
+          pre=""; case "$VERSION" in *-*) pre="--prerelease" ;; esac
+          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag --generate-notes --notes-file notes.md \
+            --title "Ventrolab AI SRE $VERSION" $pre

@@ -1,0 +1,31 @@
+name: readiness-probe-failing
+description: The container runs but its readiness probe checks a file that is never created.
+namespace: catalog
+steps:
+  - apply: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: {name: catalog-web}
+      spec:
+        replicas: 1
+        selector: {matchLabels: {app: catalog-web}}
+        template:
+          metadata: {labels: {app: catalog-web}}
+          spec:
+            containers:
+              - name: web
+                image: busybox:1.36.1
+                command: [sh, -c, 'echo "catalog-web listening"; while true; do sleep 30; done']
+                readinessProbe:
+                  exec: {command: [cat, /tmp/warmup-complete]}
+                  periodSeconds: 5
+                resources: {requests: {cpu: 5m, memory: 8Mi}, limits: {memory: 32Mi}}
+    wait: {selector: app=catalog-web, reasons: [ContainersNotReady], hold: 40}
+alert:
+  alertname: KubePodNotReady
+  labels: {severity: warning}
+  summary: Pod {namespace}/{pod} has been in a non-ready state for longer than 15 minutes.
+expect:
+  root_cause: [[readiness], [/tmp/warmup-complete, warmup-complete, probe]]
+  playbook: null
+  min_confidence: 0.7

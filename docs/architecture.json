@@ -1,0 +1,655 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Ventrolab AI SRE",
+    "output": "docs/architecture.html",
+    "locale": "en",
+    "quality_profile": "showcase"
+  },
+  "components": [
+    {
+      "id": "claude",
+      "type": "external",
+      "label": "Claude API",
+      "sublabel": "Anthropic",
+      "pos": [
+        515,
+        0
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "openai",
+      "type": "external",
+      "label": "OpenAI API",
+      "sublabel": "ChatGPT models",
+      "pos": [
+        715,
+        0
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "ollama",
+      "type": "cloud",
+      "label": "Ollama / vLLM",
+      "sublabel": "self-hosted · GPU",
+      "pos": [
+        915,
+        0
+      ],
+      "size": [
+        170,
+        64
+      ]
+    },
+    {
+      "id": "gateway",
+      "type": "cloud",
+      "label": "LLM Gateway",
+      "sublabel": "LiteLLM · OpenAI-compatible",
+      "pos": [
+        710,
+        130
+      ],
+      "size": [
+        180,
+        64
+      ],
+      "tag": "LLM_PROVIDER"
+    },
+    {
+      "id": "holmes",
+      "type": "backend",
+      "label": "HolmesGPT",
+      "sublabel": "investigation · RCA (read-only)",
+      "pos": [
+        690,
+        250
+      ],
+      "size": [
+        220,
+        70
+      ],
+      "tag": "investigator"
+    },
+    {
+      "id": "scheduler",
+      "type": "backend",
+      "label": "Scheduler",
+      "sublabel": "CronJob · health checks",
+      "pos": [
+        40,
+        300
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "alertmanager",
+      "type": "external",
+      "label": "Alertmanager",
+      "sublabel": "ai_sre=\"investigate\"",
+      "pos": [
+        40,
+        433
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "ingest",
+      "type": "backend",
+      "label": "Event Ingest",
+      "sublabel": "dedup · correlate",
+      "pos": [
+        260,
+        433
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "queue",
+      "type": "messagebus",
+      "label": "Event Queue",
+      "sublabel": "NATS JetStream",
+      "pos": [
+        480,
+        433
+      ],
+      "size": [
+        140,
+        64
+      ]
+    },
+    {
+      "id": "controller",
+      "type": "backend",
+      "label": "SRE Controller",
+      "sublabel": "incident FSM · playbooks",
+      "pos": [
+        700,
+        390
+      ],
+      "size": [
+        200,
+        150
+      ],
+      "tag": "core"
+    },
+    {
+      "id": "postgres",
+      "type": "database",
+      "label": "PostgreSQL",
+      "sublabel": "incidents · RAG",
+      "pos": [
+        980,
+        433
+      ],
+      "size": [
+        120,
+        64
+      ]
+    },
+    {
+      "id": "slack",
+      "type": "external",
+      "label": "Slack",
+      "pos": [
+        40,
+        580
+      ],
+      "size": [
+        150,
+        50
+      ]
+    },
+    {
+      "id": "telegram",
+      "type": "external",
+      "label": "Telegram",
+      "pos": [
+        40,
+        640
+      ],
+      "size": [
+        150,
+        50
+      ]
+    },
+    {
+      "id": "otherchat",
+      "type": "external",
+      "label": "Other messenger",
+      "sublabel": "Mattermost · Teams",
+      "pos": [
+        40,
+        700
+      ],
+      "size": [
+        150,
+        50
+      ]
+    },
+    {
+      "id": "chatgw",
+      "type": "frontend",
+      "label": "Chat Gateway",
+      "sublabel": "adapter plugins",
+      "pos": [
+        260,
+        580
+      ],
+      "size": [
+        150,
+        170
+      ]
+    },
+    {
+      "id": "vault",
+      "type": "security",
+      "label": "Vault",
+      "sublabel": "short-lived creds",
+      "pos": [
+        475,
+        640
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "guard",
+      "type": "security",
+      "label": "Action Guard",
+      "sublabel": "SRE_MODE=readonly|autofix",
+      "pos": [
+        705,
+        620
+      ],
+      "size": [
+        190,
+        76
+      ],
+      "tag": "risk · rate limit"
+    },
+    {
+      "id": "audit",
+      "type": "database",
+      "label": "Audit & Traces",
+      "sublabel": "Langfuse / OTel",
+      "pos": [
+        955,
+        626
+      ],
+      "size": [
+        140,
+        64
+      ]
+    },
+    {
+      "id": "hub",
+      "type": "backend",
+      "label": "Tool Hub",
+      "sublabel": "MCP for HolmesGPT · routes to agents · redaction · tunnel ingress (TLS)",
+      "pos": [
+        440,
+        790
+      ],
+      "size": [
+        700,
+        72
+      ]
+    },
+    {
+      "id": "localk8s",
+      "type": "cloud",
+      "label": "Local Kubernetes",
+      "sublabel": "local k8s-agent",
+      "pos": [
+        430,
+        960
+      ],
+      "size": [
+        165,
+        64
+      ]
+    },
+    {
+      "id": "obs",
+      "type": "database",
+      "label": "Metrics & Logs",
+      "sublabel": "Prom/VM · VL/Loki/ES",
+      "pos": [
+        615,
+        960
+      ],
+      "size": [
+        165,
+        64
+      ]
+    },
+    {
+      "id": "remotek8s",
+      "type": "cloud",
+      "label": "Remote Clusters",
+      "sublabel": "k8s-agent · agent token",
+      "pos": [
+        800,
+        960
+      ],
+      "size": [
+        165,
+        64
+      ]
+    },
+    {
+      "id": "hosts",
+      "type": "external",
+      "label": "Standalone Hosts",
+      "sublabel": "host-agent · allowlist",
+      "pos": [
+        985,
+        960
+      ],
+      "size": [
+        165,
+        64
+      ]
+    },
+    {
+      "id": "keycloak",
+      "type": "security",
+      "label": "Keycloak",
+      "sublabel": "OIDC identity provider",
+      "pos": [
+        40,
+        170
+      ],
+      "size": [
+        150,
+        64
+      ]
+    },
+    {
+      "id": "web",
+      "type": "frontend",
+      "label": "Web Console",
+      "sublabel": "dashboard · approvals",
+      "pos": [
+        260,
+        170
+      ],
+      "size": [
+        150,
+        64
+      ],
+      "tag": "local + SSO"
+    }
+  ],
+  "boundaries": [
+    {
+      "kind": "region",
+      "label": "SRE control cluster · namespace ai-sre",
+      "wraps": [
+        "gateway",
+        "holmes",
+        "ingest",
+        "queue",
+        "controller",
+        "postgres",
+        "chatgw",
+        "vault",
+        "guard",
+        "audit",
+        "hub",
+        "web"
+      ]
+    },
+    {
+      "kind": "region",
+      "label": "Remote sites",
+      "wraps": [
+        "remotek8s",
+        "hosts"
+      ]
+    }
+  ],
+  "connections": [
+    {
+      "id": "alert-webhook",
+      "from": "alertmanager",
+      "to": "ingest",
+      "label": "webhook",
+      "variant": "emphasis"
+    },
+    {
+      "id": "scheduled-check",
+      "from": "scheduler",
+      "to": "ingest",
+      "label": "check task",
+      "fromSide": "right",
+      "toSide": "top"
+    },
+    {
+      "id": "ingest-queue",
+      "from": "ingest",
+      "to": "queue",
+      "label": "event",
+      "variant": "emphasis"
+    },
+    {
+      "id": "queue-ctrl",
+      "from": "queue",
+      "to": "controller",
+      "label": "consume",
+      "variant": "emphasis"
+    },
+    {
+      "id": "ctrl-holmes",
+      "from": "controller",
+      "to": "holmes",
+      "label": "investigate",
+      "variant": "emphasis",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "holmes-llm",
+      "from": "holmes",
+      "to": "gateway",
+      "label": "LLM calls",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "llm-claude",
+      "from": "gateway",
+      "to": "claude",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "variant": "dashed"
+    },
+    {
+      "id": "llm-openai",
+      "from": "gateway",
+      "to": "openai",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "variant": "dashed"
+    },
+    {
+      "id": "llm-ollama",
+      "from": "gateway",
+      "to": "ollama",
+      "fromSide": "top",
+      "toSide": "bottom",
+      "variant": "dashed"
+    },
+    {
+      "id": "holmes-read",
+      "from": "holmes",
+      "to": "hub",
+      "label": "read tools"
+    },
+    {
+      "id": "ctrl-state",
+      "from": "controller",
+      "to": "postgres",
+      "label": "state",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "ctrl-guard",
+      "from": "controller",
+      "to": "guard",
+      "label": "action plan",
+      "variant": "emphasis",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "guard-audit",
+      "from": "guard",
+      "to": "audit",
+      "label": "audit",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "guard-hub",
+      "from": "guard",
+      "to": "hub",
+      "label": "write tools",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "vault-hub",
+      "from": "vault",
+      "to": "hub",
+      "label": "creds",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "slack-gw",
+      "from": "slack",
+      "to": "chatgw",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "telegram-gw",
+      "from": "telegram",
+      "to": "chatgw",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "other-gw",
+      "from": "otherchat",
+      "to": "chatgw",
+      "fromSide": "right",
+      "toSide": "left"
+    },
+    {
+      "id": "chat-cmd",
+      "from": "chatgw",
+      "to": "ingest",
+      "label": "commands · approvals",
+      "fromSide": "top",
+      "toSide": "bottom"
+    },
+    {
+      "id": "ctrl-notify",
+      "from": "controller",
+      "to": "chatgw",
+      "label": "RCA · approval request",
+      "variant": "dashed",
+      "fromSide": "left",
+      "toSide": "right"
+    },
+    {
+      "id": "hub-local",
+      "from": "hub",
+      "to": "localk8s",
+      "label": "tool calls",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "hub-obs",
+      "from": "hub",
+      "to": "obs",
+      "label": "PromQL · log queries",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "hub-remote",
+      "from": "hub",
+      "to": "remotek8s",
+      "label": "WSS tunnel",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "hub-hosts",
+      "from": "hub",
+      "to": "hosts",
+      "label": "WSS tunnel",
+      "variant": "security",
+      "fromSide": "bottom",
+      "toSide": "top"
+    },
+    {
+      "id": "web-oidc",
+      "from": "web",
+      "to": "keycloak",
+      "label": "OIDC",
+      "variant": "security",
+      "fromSide": "left",
+      "toSide": "right"
+    },
+    {
+      "id": "web-actions",
+      "from": "web",
+      "to": "ingest",
+      "label": "actions · questions",
+      "fromSide": "bottom",
+      "toSide": "top"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "HolmesGPT as investigator",
+      "items": [
+        "Only alerts labeled ai_sre=\"investigate\" are routed to AI SRE; the rest stay on direct receivers",
+        "SRE Controller calls the Holmes HTTP API with the alert context",
+        "Holmes reaches every target through Tool Hub MCP servers (read tools only)",
+        "Holmes returns RCA plus a structured remediation proposal",
+        "Controller owns incident state, dedup and the remediation playbooks"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "Remediation mode (SRE_MODE)",
+      "items": [
+        "readonly: actions only proposed in chat, never executed",
+        "autofix: low-risk playbooks run automatically; high-risk ones wait for chat approval",
+        "Every action: dry-run, verify, automatic rollback on failure",
+        "Rate limit and circuit breaker per target; full audit trail"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Web console",
+      "items": [
+        "Dashboard: incidents, time to diagnosis, remediation mode, component health",
+        "Incidents, approvals, questions to HolmesGPT, playbooks, knowledge base",
+        "Local accounts and OIDC (Keycloak); SSO-only mode; roles viewer, operator, admin",
+        "Actions go through ingest, like chat commands"
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Chat Gateway plugins",
+      "items": [
+        "One internal message model: notify, ask, approve, reject",
+        "Adapters (Slack, Telegram, others) enabled via CHAT_ADAPTERS",
+        "Interactive buttons map to approval events in the queue"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "LLM and reach",
+      "items": [
+        "LLM_PROVIDER picks claude / openai / ollama behind LiteLLM",
+        "Agents dial out over WSS with an agent token (mTLS optional); TLS ends at an ingress, no inbound ports",
+        "Logs: Loki, VictoriaLogs, Elasticsearch/OpenSearch behind one logs.query interface",
+        "Per-target RBAC; read and write tools are separate MCP permissions"
+      ]
+    }
+  ]
+}

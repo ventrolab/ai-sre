@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% from "macros.html" import status_badge, confidence, target %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<div hx-get="/" hx-trigger="every 30s" hx-select="#dash" hx-target="#dash" hx-swap="outerHTML"></div>
+<div id="dash">
+<div class="page-head">
+  <div><h1>Dashboard</h1><div class="sub">Incidents, remediation state and component health. Refreshes every 30 seconds.</div></div>
+  {% if guard %}
+  <div class="row">
+    <span class="badge {{ 'info' if guard.mode == 'readonly' else 'warn' }}">SRE_MODE={{ guard.mode }}</span>
+    <span class="badge">max risk {{ guard.autofix_max_risk }}</span>
+  </div>
+  {% endif %}
+</div>
+
+<div class="grid kpi">
+  <div class="card"><div class="label">Open incidents</div><div class="value">{{ open_total }}</div>
+    <div class="hint">{{ data.by_status.get('investigating', 0) }} investigating</div></div>
+  <div class="card"><div class="label">Awaiting approval</div><div class="value">{{ data.pending_approvals }}</div>
+    <div class="hint"><a href="/approvals">review</a></div></div>
+  <div class="card"><div class="label">Opened, 24 h / 7 d</div><div class="value">{{ data.opened_24h }} <span class="muted" style="font-size:16px">/ {{ data.opened_7d }}</span></div>
+    <div class="hint">{{ data.by_status.get('resolved', 0) }} resolved in total</div></div>
+  <div class="card"><div class="label">Time to diagnosis, 7 d avg</div><div class="value">{{ data.mttd | duration }}</div>
+    <div class="hint">from alert to RCA</div></div>
+  <div class="card"><div class="label">Time to resolve, 7 d avg</div><div class="value">{{ data.mttr | duration }}</div>
+    <div class="hint">until all alerts resolved</div></div>
+  <div class="card"><div class="label">Failed investigations</div><div class="value">{{ data.by_status.get('investigation_failed', 0) }}</div>
+    <div class="hint">open, need attention</div></div>
+</div>
+
+<div class="grid two">
+  <div class="card">
+    <h2>Incidents per day, last 14 days</h2>
+    <div class="bars">
+      {% for d in data.per_day %}
+      <div class="bar" title="{{ d.day }}: {{ d.n }}">
+        <span class="n">{{ d.n if d.n }}</span>
+        <div class="fill" style="height: {{ (d.n / peak * 100) | round | int }}%"></div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="bars-axis">{% for d in data.per_day %}<span>{{ d.day.strftime('%d') }}</span>{% endfor %}</div>
+  </div>
+  <div class="card">
+    <h2>Components</h2>
+    <table>
+      {% for h in health %}
+      <tr><td><span class="dot {{ 'ok' if h.ok else 'bad' }}"></span>{{ h.name }}</td>
+          <td class="num small muted">{{ 'up' if h.ok else (h.detail or 'down') }}</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+</div>
+
+<div class="grid two" style="margin-top:14px">
+  <div class="card">
+    <div class="row" style="justify-content:space-between"><h2>Latest incidents</h2><a class="small" href="/incidents?status=all">all incidents</a></div>
+    <table>
+      <tr><th>Incident</th><th>Target</th><th>Status</th><th class="num">Confidence</th><th class="num">Updated</th></tr>
+      {% for i in data.recent %}
+      <tr><td><a href="/incidents/{{ i.id }}">{{ i.title }}</a></td><td>{{ target(i.target) }}</td>
+          <td>{{ status_badge(i.status) }}</td><td class="num">{{ confidence(i.confidence) }}</td>
+          <td class="num small muted nowrap">{{ i.updated_at | ago }}</td></tr>
+      {% else %}
+      <tr><td colspan="5" class="muted">No incidents yet.</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+  <div class="grid">
+    <div class="card">
+      <h2>Remediation</h2>
+      {% if guard %}
+      <dl class="kv">
+        <dt>Mode</dt><dd>{{ guard.mode }}</dd>
+        <dt>Max auto risk</dt><dd>{{ guard.autofix_max_risk }}</dd>
+        <dt>Actions / hour</dt><dd>{{ guard.autofix_max_actions_per_hour }} per target</dd>
+        <dt>Catalog</dt><dd><span class="mono">{{ guard.catalog_version }}</span>, {{ guard.playbooks }} playbooks
+          <span class="badge {{ 'ok' if guard.catalog_valid else 'bad' }}">{{ 'valid' if guard.catalog_valid else 'rejected update' }}</span></dd>
+      </dl>
+      {% else %}<div class="alert bad">Action Guard is unavailable.</div>{% endif %}
+    </div>
+    <div class="card">
+      <h2>LLM</h2>
+      <dl class="kv"><dt>Provider</dt><dd>{{ cfg.llm_provider or '-' }}</dd>
+        <dt>Fallbacks</dt><dd>{{ cfg.llm_fallbacks | join(', ') or 'none' }}</dd></dl>
+    </div>
+    <div class="card">
+      <h2>Top alerts, 7 days</h2>
+      {% set top = data.top_alerts[0].n if data.top_alerts else 1 %}
+      {% for a in data.top_alerts %}
+      <div class="small" style="margin-bottom:8px"><div class="row" style="justify-content:space-between"><span class="mono">{{ a.alertname }}</span><span class="muted">{{ a.n }}</span></div>
+        <div class="meter"><div style="width: {{ (a.n / top * 100) | round | int }}%"></div></div></div>
+      {% else %}<div class="muted small">No alerts.</div>{% endfor %}
+    </div>
+  </div>
+</div>
+</div>
+{% endblock %}

@@ -1,0 +1,21 @@
+apiVersion: ai-sre.io/v1
+kind: Playbook
+metadata:
+  name: cordon-unhealthy-node
+spec:
+  enabled: true
+  description: Mark an unhealthy node unschedulable so new pods avoid it
+  risk: medium
+  match:
+    alertnames: [KubeNodeNotReady, KubeNodeUnreachable, NodeFilesystemAlmostOutOfSpace]
+    targetKind: k8s.node
+  action:
+    primitive: k8s.node.cordon
+    params:
+      node: "{{ target.node }}"
+  verify:
+    promql: 'kube_node_spec_unschedulable{node="{{ target.node }}"} == 1'
+    timeout: 2m
+  rollback: none
+  limits:
+    maxPerTargetPerHour: 1

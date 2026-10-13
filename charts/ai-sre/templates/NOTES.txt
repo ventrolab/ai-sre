@@ -1,0 +1,26 @@
+Ventrolab AI SRE {{ .Chart.AppVersion }} installed as {{ .Release.Name }}.
+
+Mode: SRE_MODE={{ .Values.remediation.mode }}, AUTOFIX_MAX_RISK={{ .Values.remediation.maxRisk }}
+LLM:  provider {{ .Values.llm.provider }}{{ with .Values.llm.fallbacks }}, fallbacks {{ join ", " . }}{{ end }}
+Chat: {{ .Values.chat.adapters }}
+
+Point Alertmanager at the ingest webhook:
+
+  receivers:
+    - name: ai-sre
+      webhook_configs:
+        - url: http://{{ .Release.Name }}-ingest.{{ .Release.Namespace }}.svc:8080/v1/alerts/alertmanager
+          send_resolved: true
+          http_config:
+            authorization:
+              credentials: <INGEST_TOKEN from secret {{ .Release.Name }}-secrets>
+
+and route only the alerts that need an investigation to it, keeping your usual receivers
+(label the rules with ai_sre: investigate; details in docs/alerting.md):
+
+  route:
+    routes:
+      - receiver: ai-sre
+        continue: true
+        matchers: ['ai_sre="investigate"']
+        group_by: ['...']

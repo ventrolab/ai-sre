@@ -1,0 +1,74 @@
+# Rendered by deploy/demo/Makefile: __INGEST_TOKEN__ is replaced with the ingest token from
+# the Secret ai-sre-secrets. Rules labeled ai_sre="investigate" go to Ventrolab AI SRE (see
+# docs/alerting.md); the rest would go to your usual receivers ("null" in the demo).
+server:
+  datasource:
+    url: http://vmsingle-victoria-metrics-single-server:8428
+  remote:
+    write:
+      url: http://vmsingle-victoria-metrics-single-server:8428
+    read:
+      url: http://vmsingle-victoria-metrics-single-server:8428
+  extraArgs:
+    external.label: cluster=demo
+    evaluationInterval: 30s
+  resources:
+    requests: {cpu: 20m, memory: 32Mi}
+    limits: {memory: 128Mi}
+  config:
+    alerts:
+      groups:
+        - name: kubernetes
+          rules:
+            - alert: KubePodCrashLooping
+              expr: max_over_time(kube_pod_container_status_waiting_reason{reason="CrashLoopBackOff"}[5m]) >= 1
+              for: 1m
+              labels: {severity: warning, ai_sre: investigate}
+              annotations:
+                summary: 'Pod {{ $labels.namespace }}/{{ $labels.pod }} ({{ $labels.container }}) is crash looping'
+            - alert: KubeContainerOOMKilled
+              expr: increase(kube_pod_container_status_restarts_total[10m]) > 0 and on (namespace, pod, container) kube_pod_container_status_last_terminated_reason{reason="OOMKilled"} == 1
+              labels: {severity: warning, ai_sre: investigate}
+              annotations:
+                summary: 'Container {{ $labels.namespace }}/{{ $labels.pod }} ({{ $labels.container }}) was OOM killed'
+            - alert: KubeJobFailed
+              expr: kube_job_status_failed > 0
+              for: 1m
+              labels: {severity: warning, ai_sre: investigate}
+              annotations:
+                summary: 'Job {{ $labels.namespace }}/{{ $labels.job_name }} failed'
+            # Needs no investigation: the alert says everything. Not routed to AI SRE.
+            - alert: KubeDeploymentReplicasMismatch
+              expr: kube_deployment_spec_replicas != kube_deployment_status_replicas_available
+              for: 5m
+              labels: {severity: info}
+              annotations:
+                summary: 'Deployment {{ $labels.namespace }}/{{ $labels.deployment }} does not have the expected number of available replicas'
+
+alertmanager:
+  enabled: true
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}
+    limits: {memory: 128Mi}
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      receiver: "null"
+      routes:
+        - receiver: ai-sre
+          continue: true
+          matchers: ['ai_sre="investigate"']
+          group_by: ['...']
+          group_wait: 30s
+          group_interval: 5m
+          repeat_interval: 4h
+    receivers:
+      - name: "null"
+      - name: ai-sre
+        webhook_configs:
+          - url: http://ai-sre-ingest.ai-sre.svc:8080/v1/alerts/alertmanager
+            send_resolved: true
+            http_config:
+              authorization:
+                credentials: __INGEST_TOKEN__

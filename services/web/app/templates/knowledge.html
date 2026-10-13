@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Knowledge base{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Knowledge base</h1>
+<div class="sub">Troubleshooting skills HolmesGPT loads when an alert or question matches their description.</div></div>
+<span class="badge">{{ skills | length }} skills</span></div>
+{% for s in skills %}
+<details>
+  <summary>{{ s.name }} <span class="muted">&middot; {{ s.description }}</span></summary>
+  <div class="prose" style="margin-top:10px">{{ s.body | markdown | safe }}</div>
+</details>
+{% else %}
+<div class="muted">No skills are mounted.</div>
+{% endfor %}
+{% endblock %}

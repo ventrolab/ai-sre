@@ -1,0 +1,251 @@
+{{- if .Values.toolHub.enabled }}
+{{- $name := printf "%s-tool-hub" .Release.Name -}}
+{{- $th := .Values.toolHub -}}
+{{- $auth := $th.tunnel.auth -}}
+{{- if not (has $auth (list "token" "mtls" "both")) }}{{ fail "toolHub.tunnel.auth must be token, mtls or both" }}{{ end -}}
+{{- /* The CA survives upgrades: agents in other clusters hold certificates it signed. */ -}}
+{{- $caSecret := lookup "v1" "Secret" .Release.Namespace (printf "%s-ca" $name) -}}
+{{- $ca := dict -}}
+{{- if and $caSecret (index $caSecret.data "ca.key") -}}
+{{- $ca = buildCustomCert (index $caSecret.data "ca.crt") (index $caSecret.data "ca.key") -}}
+{{- else -}}
+{{- $ca = genCA "ai-sre-tool-hub-ca" 3650 -}}
+{{- end -}}
+{{- $dns := concat (list $name (printf "%s.%s" $name .Release.Namespace) (printf "%s.%s.svc" $name .Release.Namespace)) $th.tunnel.dnsNames -}}
+{{- $server := genSignedCert $name $th.tunnel.ipAddresses $dns 825 $ca -}}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}-ca
+  labels: {{- include "aisre.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+type: Opaque
+data:
+  ca.crt: {{ $ca.Cert | b64enc }}
+  ca.key: {{ $ca.Key | b64enc }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}-tls
+  labels: {{- include "aisre.labels" . | nindent 4 }}
+type: kubernetes.io/tls
+data:
+  tls.crt: {{ $server.Cert | b64enc }}
+  tls.key: {{ $server.Key | b64enc }}
+  ca.crt: {{ $ca.Cert | b64enc }}
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}-token
+  labels: {{- include "aisre.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  TOOL_HUB_TOKEN: {{ include "aisre.secretValue" (dict "root" . "secret" (printf "%s-token" $name) "key" "TOOL_HUB_TOKEN") | quote }}
+---
+# Write path token: Action Guard and hub only, never HolmesGPT.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}-action-token
+  labels: {{- include "aisre.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  TOOL_HUB_ACTION_TOKEN: {{ include "aisre.secretValue" (dict "root" . "secret" (printf "%s-action-token" $name) "key" "TOOL_HUB_ACTION_TOKEN") | quote }}
+{{- if .Values.localAgent.enabled }}
+---
+{{- if eq $auth "mtls" }}
+{{- $agent := genSignedCert .Values.clusterName nil nil 825 $ca }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Release.Name }}-local-agent-tls
+  labels: {{- include "aisre.labels" . | nindent 4 }}
+type: kubernetes.io/tls
+data:
+  tls.crt: {{ $agent.Cert | b64enc }}
+  tls.key: {{ $agent.Key | b64enc }}
+  ca.crt: {{ $ca.Cert | b64enc }}
+{{- else }}
+# Agent token of the local agent; the hub reads it as a static token named after the cluster.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ .Release.Name }}-local-agent-token
+  labels: {{- include "aisre.labels" . | nindent 4 }}
+type: Opaque
+stringData:
+  token: {{ include "aisre.secretValue" (dict "root" . "secret" (printf "%s-local-agent-token" .Release.Name) "key" "token") | quote }}
+{{- end }}
+{{- end }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels: {{- include "aisre.labels" . | nindent 4 }}
+    app.kubernetes.io/name: tool-hub
+spec:
+  # Agents are registered in memory; one replica owns all tunnels.
+  replicas: 1
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {{- include "aisre.selector" (dict "root" . "name" "tool-hub") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "aisre.selector" (dict "root" . "name" "tool-hub") | nindent 8 }}
+    spec:
+      enableServiceLinks: false
+      {{- include "aisre.scheduling" $ | nindent 6 }}
+      containers:
+        - name: tool-hub
+          image: {{ include "aisre.image" (dict "root" . "name" "tool-hub") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            {{- include "aisre.licenseEnv" . | nindent 12 }}
+            - {name: CALL_TIMEOUT, value: {{ $th.callTimeout | quote }}}
+            - {name: MAX_OUTPUT_BYTES, value: {{ $th.maxOutputBytes | quote }}}
+            - {name: TUNNEL_CERT, value: /etc/tool-hub/tls/tls.crt}
+            - {name: TUNNEL_KEY, value: /etc/tool-hub/tls/tls.key}
+            - {name: TUNNEL_CA, value: /etc/tool-hub/tls/ca.crt}
+            - {name: ENROLL_CERT_DAYS, value: {{ $th.enrollment.certDays | quote }}}
+            - {name: TUNNEL_AUTH, value: {{ $auth | quote }}}
+            {{- if and .Values.localAgent.enabled (ne $auth "mtls") }}
+            - {name: STATIC_TOKENS_DIR, value: /etc/tool-hub/agent-tokens}
+            {{- end }}
+            # Agent registry (table "agents"), shown in the web console.
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: {{ .Release.Name }}-secrets, key: POSTGRES_PASSWORD}
+            - name: DATABASE_URL
+              value: postgresql://aisre:$(POSTGRES_PASSWORD)@{{ .Release.Name }}-postgres:5432/aisre
+          envFrom:
+            - secretRef: {name: {{ $name }}-token}
+            - secretRef: {name: {{ $name }}-action-token}
+          ports:
+            - {name: http, containerPort: 8080}
+            - {name: tunnel, containerPort: 8443}
+            {{- if ne $auth "mtls" }}
+            # Token tunnel without TLS, for an ingress that terminates TLS.
+            - {name: tunnel-http, containerPort: 8081}
+            {{- end }}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 30
+          resources: {{- toYaml $th.resources | nindent 12 }}
+          securityContext: {{- include "aisre.securityContext" . | nindent 12 }}
+          volumeMounts:
+            - {name: tls, mountPath: /etc/tool-hub/tls, readOnly: true}
+            # CA key: the hub signs agent certificates at enrollment. No other pod mounts it.
+            - {name: ca, mountPath: /etc/tool-hub/ca, readOnly: true}
+            {{- if and .Values.localAgent.enabled (ne $auth "mtls") }}
+            - {name: agent-tokens, mountPath: /etc/tool-hub/agent-tokens, readOnly: true}
+            {{- end }}
+      volumes:
+        - name: tls
+          secret: {secretName: {{ $name }}-tls}
+        - name: ca
+          secret: {secretName: {{ $name }}-ca}
+        {{- if and .Values.localAgent.enabled (ne $auth "mtls") }}
+        - name: agent-tokens
+          secret:
+            secretName: {{ .Release.Name }}-local-agent-token
+            items: [{key: token, path: {{ .Values.clusterName | quote }}}]
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels: {{- include "aisre.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "aisre.selector" (dict "root" . "name" "tool-hub") | nindent 4 }}
+  ports:
+    - {name: http, port: 8080, targetPort: http}
+    - {name: tunnel, port: 8443, targetPort: tunnel}
+    {{- if ne $auth "mtls" }}
+    - {name: tunnel-http, port: 8081, targetPort: tunnel-http}
+    {{- end }}
+{{- if ne $th.tunnel.service.type "ClusterIP" }}
+---
+# Agents in other clusters and on hosts dial this endpoint (TLS with the hub CA; needed
+# for mtls, optional for tokens).
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}-tunnel
+  labels: {{- include "aisre.labels" . | nindent 4 }}
+spec:
+  type: {{ $th.tunnel.service.type }}
+  selector: {{- include "aisre.selector" (dict "root" . "name" "tool-hub") | nindent 4 }}
+  ports:
+    - name: tunnel
+      port: 8443
+      targetPort: tunnel
+      {{- with $th.tunnel.service.nodePort }}
+      nodePort: {{ . }}
+      {{- end }}
+{{- end }}
+{{- with $th.tunnel.ingress }}
+{{- if .enabled }}
+{{- if eq $auth "mtls" }}{{ fail "toolHub.tunnel.ingress terminates TLS and needs tunnel.auth token or both" }}{{ end }}
+---
+# Agents outside the cluster: TLS ends at the ingress, agents send their token. Only the
+# tunnel and enrollment are exposed, not the MCP and action API of the hub.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $name }}-tunnel
+  labels: {{- include "aisre.labels" $ | nindent 4 }}
+  annotations:
+    # Tunnels are long-lived WebSockets; the hub pings every 20 s.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    {{- with .annotations }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  ingressClassName: {{ .className }}
+  {{- with .tlsSecretName }}
+  tls:
+    - hosts: [{{ $.Values.toolHub.tunnel.ingress.host | quote }}]
+      secretName: {{ . }}
+  {{- end }}
+  rules:
+    - host: {{ required "toolHub.tunnel.ingress.host is required" .host | quote }}
+      http:
+        paths:
+          {{- range list "/v1/tunnel" "/v1/enroll" }}
+          - path: {{ . }}
+            pathType: Exact
+            backend:
+              service:
+                name: {{ $name }}
+                port: {name: tunnel-http}
+          {{- end }}
+{{- end }}
+{{- end }}
+{{- with $th.tunnel.gatewayRoute }}
+{{- if .enabled }}
+---
+# TLS passthrough (for mtls): the Gateway listener must use protocol TLS, mode Passthrough.
+apiVersion: {{ .apiVersion }}
+kind: TLSRoute
+metadata:
+  name: {{ $name }}-tunnel
+  labels: {{- include "aisre.labels" $ | nindent 4 }}
+spec:
+  parentRefs: {{- required "toolHub.tunnel.gatewayRoute.parentRefs is required" .parentRefs | toYaml | nindent 4 }}
+  hostnames: {{- required "toolHub.tunnel.gatewayRoute.hostnames is required" .hostnames | toYaml | nindent 4 }}
+  rules:
+    - backendRefs:
+        - name: {{ $name }}
+          port: 8443
+{{- end }}
+{{- end }}
+{{- end }}

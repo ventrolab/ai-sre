@@ -1,0 +1,48 @@
+name: bad-rollout
+description: >
+  Revision 1 runs fine; revision 2 changes the command to one that exits 1. The right
+  action is a rollback to the previous revision.
+namespace: orders
+steps:
+  - apply: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: {name: orders-worker}
+      spec:
+        replicas: 1
+        revisionHistoryLimit: 5
+        selector: {matchLabels: {app: orders-worker}}
+        template:
+          metadata: {labels: {app: orders-worker}, annotations: {release: "1.4.0"}}
+          spec:
+            containers:
+              - name: worker
+                image: busybox:1.36.1
+                command: [sh, -c, 'echo "orders-worker 1.4.0 started"; while true; do sleep 30; done']
+                resources: {requests: {cpu: 5m, memory: 8Mi}, limits: {memory: 32Mi}}
+    wait: {selector: app=orders-worker, ready: true}
+  - apply: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: {name: orders-worker}
+      spec:
+        replicas: 1
+        revisionHistoryLimit: 5
+        selector: {matchLabels: {app: orders-worker}}
+        template:
+          metadata: {labels: {app: orders-worker}, annotations: {release: "1.5.0"}}
+          spec:
+            containers:
+              - name: worker
+                image: busybox:1.36.1
+                command: [sh, -c, 'echo "orders-worker 1.5.0 started"; sleep 2; echo "panic: unknown flag --queue-v2" >&2; exit 2']
+                resources: {requests: {cpu: 5m, memory: 8Mi}, limits: {memory: 32Mi}}
+    wait: {selector: app=orders-worker, reasons: [CrashLoopBackOff]}
+alert:
+  alertname: KubePodCrashLooping
+  labels: {container: worker, severity: warning}
+  summary: Pod {namespace}/{pod} ({container}) is in waiting state (reason CrashLoopBackOff).
+expect:
+  root_cause: [[1.5.0, revision, rollout, new version, release], [queue-v2, unknown flag, panic, exit]]
+  playbook: rollback-failed-rollout
+  min_confidence: 0.7

@@ -1,0 +1,30 @@
+name: crashloop-missing-config
+description: >
+  The app exits 1 because its config file is not mounted. One revision only, so neither a
+  restart nor a rollback helps; the offered restart and rollback playbooks are traps.
+namespace: billing
+steps:
+  - apply: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: {name: billing-api}
+      spec:
+        replicas: 1
+        selector: {matchLabels: {app: billing-api}}
+        template:
+          metadata: {labels: {app: billing-api}}
+          spec:
+            containers:
+              - name: api
+                image: busybox:1.36.1
+                command: [sh, -c, 'echo "reading settings from /etc/billing/settings.yaml"; sleep 3; echo "FATAL: /etc/billing/settings.yaml: no such file or directory" >&2; exit 1']
+                resources: {requests: {cpu: 5m, memory: 8Mi}, limits: {memory: 32Mi}}
+    wait: {selector: app=billing-api, reasons: [CrashLoopBackOff]}
+alert:
+  alertname: KubePodCrashLooping
+  labels: {container: api, severity: warning}
+  summary: Pod {namespace}/{pod} ({container}) is in waiting state (reason CrashLoopBackOff).
+expect:
+  root_cause: [[settings.yaml, config], [missing, not found, no such file, not mounted, does not exist]]
+  playbook: null
+  min_confidence: 0.7

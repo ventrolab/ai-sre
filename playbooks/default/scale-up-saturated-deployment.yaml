@@ -1,0 +1,32 @@
+apiVersion: ai-sre.io/v1
+kind: Playbook
+metadata:
+  name: scale-up-saturated-deployment
+spec:
+  enabled: true
+  description: Add replicas to a deployment saturated on CPU, within configured bounds
+  risk: medium
+  match:
+    alertnames: [DeploymentCPUSaturation]
+    targetKind: k8s.deployment
+  action:
+    primitive: k8s.deployment.scale
+    params:
+      namespace: "{{ target.namespace }}"
+      deployment: "{{ target.workload }}"
+      delta: 1
+      maxReplicas: 10
+  precheck:
+    - primitive: k8s.deployment.noActiveHPA
+  verify:
+    promql: >
+      avg(rate(container_cpu_usage_seconds_total{namespace="{{ target.namespace }}",pod=~"{{ target.workload }}-.*"}[5m])) < 0.8
+    timeout: 15m
+  rollback:
+    primitive: k8s.deployment.scale
+    params:
+      namespace: "{{ target.namespace }}"
+      deployment: "{{ target.workload }}"
+      delta: -1
+  limits:
+    maxPerTargetPerHour: 2

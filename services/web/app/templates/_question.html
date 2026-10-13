@@ -1,0 +1,12 @@
+<div class="question" id="q-{{ q.id }}"
+     {% if q.status != 'done' %}hx-get="/ask/{{ q.id }}" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
+  <div class="row" style="justify-content:space-between">
+    <div class="q">{{ q.question }}</div>
+    <span class="small muted nowrap">{{ q.created_at | ago }}</span>
+  </div>
+  {% if q.status == 'done' %}
+    <div class="prose">{{ q.answer | markdown | safe }}</div>
+  {% else %}
+    <div class="muted small"><span class="spinner"></span>{{ 'Investigating...' if q.status == 'running' else 'Queued...' }}</div>
+  {% endif %}
+</div>

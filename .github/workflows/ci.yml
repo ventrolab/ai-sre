@@ -1,0 +1,111 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/*/requirements.txt
+      - name: Install
+        run: |
+          pip install -e libs/python/aisre-common pytest==8.3.3 pytest-asyncio==0.24.0 \
+            -r services/ingest/requirements.txt -r services/controller/requirements.txt \
+            -r services/chat-gateway/requirements.txt -r services/web/requirements.txt
+      - name: Test
+        run: for s in ingest controller chat-gateway web; do (cd services/$s && python -m pytest -q) || exit 1; done
+
+  go-guard:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: services/action-guard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: services/action-guard/go.mod
+          cache-dependency-path: services/action-guard/go.sum
+      - run: go vet ./...
+      - run: go test -race ./...
+
+  go:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: gofmt
+        run: test -z "$(gofmt -l internal pkg services/tool-hub agents cli)" || { gofmt -l internal pkg services/tool-hub agents cli; exit 1; }
+      - run: go vet ./...
+      - run: go test -race ./...
+
+  cli:
+    needs: go
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build aisre (linux, darwin x amd64, arm64)
+        run: |
+          v="0.0.0-${GITHUB_SHA::7}"
+          for os in linux darwin; do
+            for arch in amd64 arm64; do
+              CGO_ENABLED=0 GOOS=$os GOARCH=$arch go build -trimpath -ldflags="-s -w -X main.version=$v" \
+                -o "dist/aisre-$os-$arch" ./cli/aisre
+            done
+          done
+          (cd dist && sha256sum -- * > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: aisre-${{ github.sha }}
+          path: dist/*
+          retention-days: 14
+
+  helm:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - run: helm dependency update charts/ai-sre
+      - run: helm lint charts/ai-sre charts/k8s-agent
+      - name: Render
+        run: |
+          helm template t charts/ai-sre > /dev/null
+          helm template t charts/ai-sre -f deploy/demo/values.yaml > /dev/null
+          helm template t charts/k8s-agent --set hubURL=wss://hub/v1/tunnel --set enrollment.token=x > /dev/null
+          helm template t charts/k8s-agent --set hubURL=wss://hub:8443/v1/tunnel --set auth=mtls \
+            --set enrollment.token=x --set enrollment.caSha256=y > /dev/null
+          helm template t charts/ai-sre --set toolHub.tunnel.ingress.enabled=true \
+            --set toolHub.tunnel.ingress.host=agent.example.com > /dev/null
+          helm template t charts/ai-sre --set toolHub.tunnel.auth=mtls > /dev/null
+
+  images:
+    needs: [python, go-guard, go, helm]
+    uses: ./.github/workflows/images.yml
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    with:
+      # Pull requests build amd64 only, without pushing; main pushes edge images.
+      push: ${{ github.event_name == 'push' }}
+      platforms: ${{ github.event_name == 'push' && 'linux/amd64,linux/arm64' || 'linux/amd64' }}

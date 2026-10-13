@@ -1,0 +1,45 @@
+---
+# Web console of AI SRE (API base) and an API token with scope agents:enroll
+# (Administration -> API tokens). Keep the token in Ansible Vault.
+ai_sre_console_url: ""
+ai_sre_api_token: ""
+ai_sre_api_validate_certs: true
+
+# Tool Hub address agents dial: toolHub.publicUrl of the chart + /v1/tunnel.
+ai_sre_hub_url: ""
+# Name checked in the hub certificate when ai_sre_hub_url uses another name or an IP.
+ai_sre_hub_server_name: ""
+# token (agent token, default) or mtls (client certificate; the hub must allow it).
+ai_sre_agent_auth: token
+# true when ai_sre_hub_url is the hub's own TLS port (hub CA, pinned at enrollment);
+# false for the tunnel ingress with a publicly trusted certificate. Always pinned for mtls.
+ai_sre_hub_ca_pinned: false
+# Where the credentials live (owned by the service user).
+ai_sre_host_agent_credentials_dir: "{{ '/etc/ai-sre/tls' if ai_sre_agent_auth == 'mtls' else '/etc/ai-sre/credentials' }}"
+
+# Local path (on the controller) of the host-agent binary (`make host-agent` -> dist/host-agent).
+ai_sre_host_agent_binary_src: ""
+
+# Target name in investigations; must be a lowercase DNS label.
+ai_sre_host_agent_name: "{{ inventory_hostname | lower }}"
+ai_sre_host_agent_labels: {}
+ai_sre_host_agent_log_files:
+  - /var/log/syslog
+ai_sre_host_agent_commands:
+  disk_usage: [df, -h]
+  failed_units: [systemctl, --failed, --no-pager]
+  listening_sockets: [ss, -ltn]
+ai_sre_host_agent_max_log_window: 24h
+# Write primitives for approved actions; off by default.
+ai_sre_host_agent_write_enabled: false
+ai_sre_host_agent_write_systemctl: []
+ai_sre_host_agent_write_clean_paths: []
+
+# Enroll again although a credential exists (renewal, reinstalled host, switching auth).
+# Replaces the registry entry of the same name.
+ai_sre_host_agent_reenroll: false
+ai_sre_host_agent_join_ttl_hours: 1
+# Tasks that handle tokens hide their output; false shows API errors (and the tokens).
+ai_sre_no_log: true
+# Off in containers without systemd (tests).
+ai_sre_host_agent_manage_service: true

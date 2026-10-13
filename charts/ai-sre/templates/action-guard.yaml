@@ -1,0 +1,63 @@
+{{- $name := printf "%s-action-guard" .Release.Name -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels: {{- include "aisre.labels" . | nindent 4 }}
+    app.kubernetes.io/name: action-guard
+spec:
+  # Rate limits are kept in memory for now, so a single replica.
+  replicas: 1
+  selector:
+    matchLabels: {{- include "aisre.selector" (dict "root" . "name" "action-guard") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "aisre.selector" (dict "root" . "name" "action-guard") | nindent 8 }}
+    spec:
+      enableServiceLinks: false
+      {{- include "aisre.scheduling" $ | nindent 6 }}
+      containers:
+        - name: action-guard
+          image: {{ include "aisre.image" (dict "root" . "name" "action-guard") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            {{- include "aisre.licenseEnv" . | nindent 12 }}
+            - {name: SRE_MODE, value: {{ .Values.remediation.mode | quote }}}
+            - {name: AUTOFIX_MAX_RISK, value: {{ .Values.remediation.maxRisk | quote }}}
+            - {name: AUTOFIX_MAX_ACTIONS_PER_HOUR, value: {{ .Values.remediation.maxActionsPerHour | quote }}}
+            - {name: PLAYBOOKS_PATH, value: /etc/ai-sre/playbooks}
+            - {name: NATS_URL, value: {{ include "aisre.natsUrl" . | quote }}}
+            {{- if .Values.toolHub.enabled }}
+            - {name: TOOL_HUB_URL, value: "http://{{ .Release.Name }}-tool-hub:8080"}
+            - name: TOOL_HUB_ACTION_TOKEN
+              valueFrom:
+                secretKeyRef: {name: {{ .Release.Name }}-tool-hub-action-token, key: TOOL_HUB_ACTION_TOKEN}
+            {{- end }}
+          ports:
+            - {name: http, containerPort: 8080}
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 30
+          resources: {{- toYaml .Values.actionGuard.resources | nindent 12 }}
+          securityContext: {{- include "aisre.securityContext" . | nindent 12 }}
+          volumeMounts:
+            # Mounted without subPath so ConfigMap edits reach the pod and the
+            # guard reloads the catalog without a restart.
+            - {name: playbooks, mountPath: /etc/ai-sre/playbooks, readOnly: true}
+      volumes:
+        - name: playbooks
+          configMap:
+            name: {{ .Values.remediation.playbooks.existingConfigMap | default (printf "%s-playbooks" .Release.Name) }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels: {{- include "aisre.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "aisre.selector" (dict "root" . "name" "action-guard") | nindent 4 }}
+  ports:
+    - {name: http, port: 8080, targetPort: http}

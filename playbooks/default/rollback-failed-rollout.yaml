@@ -1,0 +1,23 @@
+apiVersion: ai-sre.io/v1
+kind: Playbook
+metadata:
+  name: rollback-failed-rollout
+spec:
+  enabled: true
+  description: Roll a deployment back to its previous revision after a failed release
+  risk: high
+  match:
+    alertnames: [KubeDeploymentRolloutStuck, KubeDeploymentReplicasMismatch, KubePodCrashLooping]
+  action:
+    primitive: k8s.rollout.undo
+    params:
+      namespace: "{{ target.namespace }}"
+      deployment: "{{ target.workload }}"
+  verify:
+    promql: >
+      kube_deployment_status_replicas_available{namespace="{{ target.namespace }}",deployment="{{ target.workload }}"}
+      == kube_deployment_spec_replicas{namespace="{{ target.namespace }}",deployment="{{ target.workload }}"}
+    timeout: 15m
+  rollback: none
+  limits:
+    maxPerTargetPerHour: 1

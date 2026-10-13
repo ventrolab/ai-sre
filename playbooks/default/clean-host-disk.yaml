@@ -1,0 +1,24 @@
+apiVersion: ai-sre.io/v1
+kind: Playbook
+metadata:
+  name: clean-host-disk
+spec:
+  enabled: true
+  description: Remove temporary files and rotated logs from an allowlisted path on a host
+  risk: low
+  match:
+    alertnames: [NodeFilesystemSpaceFillingUp, NodeFilesystemAlmostOutOfSpace]
+    targetKind: host
+  action:
+    primitive: host.path.clean
+    params:
+      host: "{{ target.host }}"
+      path: /var/tmp
+  verify:
+    promql: >
+      node_filesystem_avail_bytes{instance=~"{{ target.host }}.*",mountpoint="/"}
+      / node_filesystem_size_bytes{instance=~"{{ target.host }}.*",mountpoint="/"} > 0.15
+    timeout: 5m
+  rollback: none
+  limits:
+    maxPerTargetPerHour: 1

@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% from "macros.html" import target %}
+{% block title %}Approvals{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Approvals</h1>
+<div class="sub">Actions above AUTOFIX_MAX_RISK, high-risk playbooks and rate-limited targets wait here. The same requests appear in chat.</div></div></div>
+<div class="card" style="margin-bottom:14px">
+  <h2>Pending</h2>
+  <table>
+    <tr><th>Incident</th><th>Target</th><th>Playbook</th><th class="num">Requested</th><th class="num">Expires</th><th></th></tr>
+    {% for a in pending %}
+    <tr><td><a href="/incidents/{{ a.incident_id }}">{{ a.title }}</a></td><td>{{ target(a.target) }}</td>
+      <td class="mono">{{ a.playbook }}</td><td class="num small muted">{{ a.requested_at | ago }}</td>
+      <td class="num small muted">{{ a.expires_at.strftime('%H:%M UTC') }}</td>
+      <td class="num nowrap">
+        {% if user.role in ('operator', 'admin') %}
+        <form class="inline" method="post" action="/approvals/{{ a.id }}/approve"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn small primary" type="submit">Approve</button></form>
+        <form class="inline" method="post" action="/approvals/{{ a.id }}/reject"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn small danger" type="submit">Reject</button></form>
+        {% else %}<span class="muted small">operator role needed</span>{% endif %}
+      </td></tr>
+    {% else %}
+    <tr><td colspan="6" class="muted">Nothing is waiting for approval.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+<div class="card">
+  <h2>History</h2>
+  <table>
+    <tr><th>Incident</th><th>Playbook</th><th>Status</th><th>Decided by</th><th class="num">When</th></tr>
+    {% for a in history %}
+    <tr><td><a href="/incidents/{{ a.incident_id }}">{{ a.title }}</a></td><td class="mono">{{ a.playbook }}</td>
+      <td><span class="badge {{ 'ok' if a.status == 'approved' else '' }}">{{ a.status }}</span></td>
+      <td class="small">{{ a.decided_by or '-' }}</td><td class="num small muted">{{ (a.decided_at or a.requested_at) | ago }}</td></tr>
+    {% else %}
+    <tr><td colspan="5" class="muted">No decisions yet.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,30 @@
+# /etc/ai-sre/host-agent.yaml
+# The hub tunnel ingress (public certificate), or wss://<hub>:8443/v1/tunnel (hub CA).
+hubURL: wss://agent.example.com/v1/tunnel
+labels:
+  env: prod
+  role: database
+# Agent token written by `ai-sre-host-agent enroll -token <join token>`; the target name
+# is the one the join token was created for.
+auth: token
+tokenFile: /etc/ai-sre/credentials/token
+# Only for the hub's own TLS port: the hub CA, written by enroll with -ca-sha256.
+# tls:
+#   ca: /etc/ai-sre/credentials/ca.crt
+# Mutual TLS instead (the hub must allow it):
+# auth: mtls
+# tls:
+#   ca: /etc/ai-sre/tls/ca.crt
+#   cert: /etc/ai-sre/tls/tls.crt
+#   key: /etc/ai-sre/tls/tls.key
+healthAddr: 127.0.0.1:8081
+maxLogWindow: 24h
+# Log files host_log_file may read (globs; symlinks are resolved first).
+logFiles:
+  - /var/log/syslog
+  - /var/log/nginx/*.log
+# Named read-only commands for host_command (argv, no shell, no arguments from the LLM).
+commands:
+  disk_usage: [df, -h]
+  failed_units: [systemctl, --failed, --no-pager]
+  listening_sockets: [ss, -ltnp]

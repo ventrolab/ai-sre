@@ -1,0 +1,33 @@
+# The kind demo end to end with a mock LLM: the images of this commit, monitoring, alerts,
+# investigations. Nightly and on demand (it takes about 15 minutes).
+name: demo
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  demo:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - uses: helm/kind-action@v1
+        with:
+          install_only: true
+      - name: Demo with a mock LLM
+        run: make -C deploy/demo demo DEV=1 LLM_PROVIDER=mock
+      - name: Incidents are diagnosed
+        run: make -C deploy/demo smoke
+      - name: Diagnostics
+        if: failure()
+        run: |
+          kubectl --context kind-ventrolab-demo get pods -A
+          for d in ingest controller chat-gateway holmes litellm; do
+            echo "== $d"; kubectl --context kind-ventrolab-demo -n ai-sre logs deploy/ai-sre-$d --tail=80 || true
+          done

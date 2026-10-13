@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}API tokens{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>API tokens</h1>
+<div class="sub">Tokens for automation (Ansible, cloud-init, CI) against <span class="mono">/api/v1</span>, e.g. enrolling standalone hosts unattended. Only the hash is stored; every use is recorded in the audit log as <span class="mono">token:&lt;name&gt;</span>.</div></div>
+</div>
+{% if error %}<div class="alert bad">{{ error }}</div>{% endif %}
+{% if new_token %}
+<div class="card" style="margin-bottom:16px">
+  <h2>Token {{ new_token_row.name }}</h2>
+  <div class="alert warn">Copy it now: it is shown only once.</div>
+  <pre class="mono">{{ new_token }}</pre>
+  <div class="small muted">Example: create a join token for a host and enroll it:</div>
+  <pre class="mono">curl -s -X POST {{ cfg.base_url }}/api/v1/agents/enrollments \
+  -H "Authorization: Bearer $AISRE_API_TOKEN" -H "Content-Type: application/json" \
+  -d '{"name": "db1.example", "ttl_hours": 1}'
+# answer: join_token, ca_sha256, hub_url, command</pre>
+</div>
+{% endif %}
+<div class="grid two">
+  <div class="card">
+    <h2>Tokens</h2>
+    <table>
+      <tr><th>Name</th><th>Scopes</th><th>Created</th><th class="num">Last used</th><th class="num">Expires</th><th></th></tr>
+      {% for t in tokens %}
+      <tr class="{{ 'muted' if t.revoked_at }}">
+        <td><strong>{{ t.name }}</strong><div class="small mono muted">{{ t.prefix }}...</div></td>
+        <td class="small mono">{{ t.scopes | join(', ') }}</td>
+        <td class="small muted">{{ t.created_by }}<div>{{ t.created_at | ago }}</div></td>
+        <td class="num small muted nowrap">{{ t.last_used_at | ago if t.last_used_at else 'never' }}</td>
+        <td class="num small muted nowrap">{% if t.revoked_at %}<span class="badge bad">revoked</span>{% elif t.expires_at %}{{ t.expires_at.strftime('%Y-%m-%d') }}{% else %}never{% endif %}</td>
+        <td class="num">{% if not t.revoked_at %}
+          <form class="inline" method="post" action="/admin/tokens/{{ t.id }}/revoke" data-confirm="Revoke token {{ t.name }}? Automation using it stops working." onsubmit="return confirm(this.dataset.confirm)">
+            <input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn small danger" type="submit">Revoke</button>
+          </form>{% endif %}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" class="muted">No API tokens.</td></tr>
+      {% endfor %}
+    </table>
+  </div>
+  <div class="card">
+    <h2>New token</h2>
+    <form method="post" action="/admin/tokens" class="grid">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label>Name <input name="name" required maxlength="80" placeholder="ansible-hosts"></label>
+      <div class="small">Scopes
+        {% for s, desc in scopes.items() %}
+        <label class="row"><input type="checkbox" name="scopes" value="{{ s }}" {{ 'checked' if s == 'agents:enroll' }}> <span class="mono">{{ s }}</span> <span class="muted">{{ desc }}</span></label>
+        {% endfor %}
+      </div>
+      <label>Expires after (days, 0 = never) <input name="days" type="number" min="0" max="3650" value="90"></label>
+      <div><button class="btn primary" type="submit">Create token</button></div>
+    </form>
+  </div>
+</div>
+<div class="card" style="margin-top:16px">
+  <h2>API</h2>
+  <table class="small">
+    <tr><th>Request</th><th>Scope</th><th>Result</th></tr>
+    <tr><td class="mono">GET /api/v1/status</td><td class="mono">status:read</td><td>remediation mode, LLM, incident counts, MTTD/MTTR, pending approvals, component health</td></tr>
+    <tr><td class="mono">GET /api/v1/incidents?status=&amp;q=&amp;limit=</td><td class="mono">status:read</td><td>incidents (default: open)</td></tr>
+    <tr><td class="mono">GET /api/v1/incidents/{id}</td><td class="mono">status:read</td><td>one incident with alerts, root cause, analysis, timeline, approvals</td></tr>
+    <tr><td class="mono">GET /api/v1/approvals</td><td class="mono">status:read</td><td>pending approvals and recent decisions</td></tr>
+    <tr><td class="mono">GET /api/v1/agents</td><td class="mono">agents:read</td><td>every agent with state, version, credential</td></tr>
+    <tr><td class="mono">POST /api/v1/agents/enrollments {"name", "ttl_hours", "note", "replace"}</td><td class="mono">agents:enroll</td><td>join token, hub URL, auth mode, CA SHA-256 when needed, install command</td></tr>
+    <tr><td class="mono">POST /api/v1/agents/{name}/revoke</td><td class="mono">agents:revoke</td><td>revokes the agent's tokens and certificate</td></tr>
+  </table>
+</div>
+{% endblock %}

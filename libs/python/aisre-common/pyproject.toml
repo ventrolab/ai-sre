@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aisre-common"
+version = "0.1.0"
+description = "Shared models and helpers for Ventrolab AI SRE services"
+requires-python = ">=3.12"
+dependencies = [
+  "pydantic==2.9.2",
+  "nats-py==2.9.0",
+]
+
+[tool.setuptools]
+packages = ["aisre_common"]

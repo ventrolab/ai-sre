@@ -1,0 +1,221 @@
+{{- $name := .Release.Name -}}
+{{- $mtls := eq .Values.auth "mtls" -}}
+{{- if not (has .Values.auth (list "token" "mtls")) }}{{ fail "auth must be token or mtls" }}{{ end -}}
+{{- $enroll := or .Values.enrollment.token .Values.enrollment.existingSecret -}}
+{{- $secret := .Values.existingSecret | default (printf "%s-%s" $name (ternary "tls" "token" $mtls)) -}}
+{{- /* The hub CA verifies the hub: pinned at enrollment, or given with the credentials. */ -}}
+{{- $hubCA := or $mtls (and $enroll .Values.enrollment.caSha256) (and (not $enroll) .Values.tls.ca) -}}
+{{- if $enroll }}
+{{- if .Values.existingSecret }}{{ fail "enrollment and existingSecret are exclusive" }}{{ end }}
+{{- if $mtls }}{{ $_ := required "enrollment.caSha256 is required for mtls" .Values.enrollment.caSha256 }}{{ end }}
+{{- if .Values.enrollment.token }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $name }}-join
+type: Opaque
+stringData:
+  token: {{ .Values.enrollment.token | quote }}
+---
+{{- end }}
+# The init container reads its credentials Secret and creates it at the first enrollment.
+# "create" cannot be limited to one name in RBAC, so it covers secrets in this namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}-enroll
+rules:
+  - apiGroups: [""]
+    resources: [secrets]
+    resourceNames: [{{ $secret }}]
+    verbs: [get]
+  - apiGroups: [""]
+    resources: [secrets]
+    verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}-enroll
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: {{ $name }}-enroll}
+subjects:
+  - {kind: ServiceAccount, name: {{ $name }}, namespace: {{ .Release.Namespace }}}
+---
+{{- else if not .Values.existingSecret }}
+apiVersion: v1
+kind: Secret
+metadata:
+  name: {{ $secret }}
+type: Opaque
+stringData:
+  {{- if $mtls }}
+  tls.crt: {{ required "tls.crt, enrollment or existingSecret is required" .Values.tls.crt | quote }}
+  tls.key: {{ required "tls.key is required" .Values.tls.key | quote }}
+  ca.crt: {{ required "tls.ca is required" .Values.tls.ca | quote }}
+  {{- else }}
+  token: {{ required "token, enrollment or existingSecret is required" .Values.token | quote }}
+  {{- with .Values.tls.ca }}
+  ca.crt: {{ . | quote }}
+  {{- end }}
+  {{- end }}
+---
+{{- end }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $name }}
+---
+# Read-only: every resource except Secrets, plus pod logs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}
+rules:
+  - apiGroups: [""]
+    resources: [pods, pods/log, services, endpoints, events, nodes, namespaces, configmaps, persistentvolumes,
+                persistentvolumeclaims, replicationcontrollers, resourcequotas, limitranges, serviceaccounts]
+    verbs: [get, list, watch]
+  - apiGroups: [apps, batch, autoscaling, policy, networking.k8s.io, storage.k8s.io, discovery.k8s.io,
+                events.k8s.io, coordination.k8s.io, apiextensions.k8s.io, metrics.k8s.io, rbac.authorization.k8s.io]
+    resources: ["*"]
+    verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: {{ $name }}}
+subjects:
+  - {kind: ServiceAccount, name: {{ $name }}, namespace: {{ .Release.Namespace }}}
+{{- if .Values.write.enabled }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ $name }}-write
+rules:
+  - apiGroups: [""]
+    resources: [pods]
+    verbs: [delete]
+  - apiGroups: [""]
+    resources: [nodes]
+    verbs: [patch]
+  - apiGroups: [apps]
+    resources: [deployments, deployments/scale]
+    verbs: [patch, update]
+  - apiGroups: [batch]
+    resources: [jobs]
+    verbs: [delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}-write
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: {{ $name }}-write}
+subjects:
+  - {kind: ServiceAccount, name: {{ $name }}, namespace: {{ .Release.Namespace }}}
+{{- end }}
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+data:
+  agent.yaml: |
+    hubURL: {{ required "hubURL is required" .Values.hubURL | quote }}
+    labels: {{- toYaml .Values.labels | nindent 6 }}
+    auth: {{ .Values.auth }}
+    {{- if not $mtls }}
+    tokenFile: /etc/ai-sre/credentials/token
+    {{- end }}
+    tls:
+      {{- if $hubCA }}
+      ca: /etc/ai-sre/credentials/ca.crt
+      {{- end }}
+      {{- if $mtls }}
+      cert: /etc/ai-sre/credentials/tls.crt
+      key: /etc/ai-sre/credentials/tls.key
+      {{- end }}
+      serverName: {{ .Values.hubServerName | quote }}
+    prometheus: {{- toYaml .Values.prometheus | nindent 6 }}
+    logBackends: {{- toYaml .Values.logBackends | nindent 6 }}
+    maxLogWindow: {{ .Values.maxLogWindow | quote }}
+    write:
+      enabled: {{ .Values.write.enabled }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  labels: {app.kubernetes.io/name: k8s-agent, app.kubernetes.io/instance: {{ $name }}}
+spec:
+  replicas: 1
+  # One connection per agent name: a rolling update would let the old and the new pod
+  # replace each other's tunnel until the old one stops.
+  strategy: {type: Recreate}
+  selector:
+    matchLabels: {app.kubernetes.io/instance: {{ $name }}}
+  template:
+    metadata:
+      labels: {app.kubernetes.io/name: k8s-agent, app.kubernetes.io/instance: {{ $name }}}
+      annotations:
+        checksum/config: {{ toYaml .Values | sha256sum }}
+    spec:
+      serviceAccountName: {{ $name }}
+      enableServiceLinks: false
+      {{- if $enroll }}
+      initContainers:
+        - name: enroll
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: [enroll-secret]
+          env:
+            - name: POD_NAMESPACE
+              valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+            - {name: AUTH, value: {{ .Values.auth }}}
+            - {name: TLS_SECRET, value: {{ $secret }}}
+            - {name: TLS_DIR, value: /etc/ai-sre/credentials}
+            - {name: HUB_URL, value: {{ .Values.hubURL | quote }}}
+            - {name: HUB_SERVER_NAME, value: {{ .Values.hubServerName | quote }}}
+            - {name: CA_SHA256, value: {{ .Values.enrollment.caSha256 | quote }}}
+            # Spent after the first enrollment; optional so it can be deleted later.
+            - name: JOIN_TOKEN
+              valueFrom:
+                secretKeyRef: {name: {{ .Values.enrollment.existingSecret | default (printf "%s-join" $name) }}, key: token, optional: true}
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: {drop: [ALL]}
+            seccompProfile: {type: RuntimeDefault}
+          volumeMounts:
+            - {name: credentials, mountPath: /etc/ai-sre/credentials}
+      {{- end }}
+      containers:
+        - name: agent
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args: [-config, /etc/ai-sre/agent.yaml]
+          ports: [{name: health, containerPort: 8081}]
+          readinessProbe: {httpGet: {path: /readyz, port: health}, periodSeconds: 10}
+          livenessProbe: {httpGet: {path: /healthz, port: health}, periodSeconds: 30}
+          resources: {{- toYaml .Values.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            capabilities: {drop: [ALL]}
+            seccompProfile: {type: RuntimeDefault}
+          volumeMounts:
+            - {name: config, mountPath: /etc/ai-sre/agent.yaml, subPath: agent.yaml, readOnly: true}
+            - {name: credentials, mountPath: /etc/ai-sre/credentials, readOnly: true}
+      volumes:
+        - name: config
+          configMap: {name: {{ $name }}}
+        - name: credentials
+          {{- if $enroll }}
+          emptyDir: {medium: Memory, sizeLimit: 1Mi}
+          {{- else }}
+          secret: {secretName: {{ $secret }}}
+          {{- end }}

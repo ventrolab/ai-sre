@@ -1,0 +1,25 @@
+[Unit]
+Description=Ventrolab AI SRE host-agent (read-only diagnostics over an outbound tunnel)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/ai-sre-host-agent -config /etc/ai-sre/host-agent.yaml
+# A dedicated user in the adm and systemd-journal groups can read logs and the journal.
+User=ai-sre
+Group=ai-sre
+SupplementaryGroups=adm systemd-journal
+Restart=always
+RestartSec=5
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadOnlyPaths=/
+CapabilityBoundingSet=
+AmbientCapabilities=
+LockPersonality=yes
+MemoryMax=128M
+
+[Install]
+WantedBy=multi-user.target

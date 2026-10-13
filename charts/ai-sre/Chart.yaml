@@ -1,0 +1,15 @@
+apiVersion: v2
+name: ai-sre
+description: Ventrolab AI SRE - alert investigation with HolmesGPT, guarded remediation, pluggable LLM and messengers
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+dependencies:
+  - name: nats
+    version: 2.15.0
+    repository: https://nats-io.github.io/k8s/helm/charts/
+    condition: nats.enabled
+  - name: holmes
+    version: 0.43.0
+    repository: https://robusta-charts.storage.googleapis.com
+    condition: holmes.enabled

@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-chat-gateway
+  labels: {{- include "aisre.labels" . | nindent 4 }}
+    app.kubernetes.io/name: chat-gateway
+spec:
+  # Telegram long polling allows one consumer per bot token.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: {{- include "aisre.selector" (dict "root" . "name" "chat-gateway") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "aisre.selector" (dict "root" . "name" "chat-gateway") | nindent 8 }}
+    spec:
+      enableServiceLinks: false
+      {{- include "aisre.scheduling" $ | nindent 6 }}
+      containers:
+        - name: chat-gateway
+          image: {{ include "aisre.image" (dict "root" . "name" "chat-gateway") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - {name: NATS_URL, value: {{ include "aisre.natsUrl" . | quote }}}
+            - {name: INGEST_URL, value: {{ include "aisre.ingestUrl" . | quote }}}
+            - name: INGEST_TOKEN
+              valueFrom:
+                secretKeyRef: {name: {{ .Release.Name }}-secrets, key: INGEST_TOKEN}
+            - {name: CHAT_ADAPTERS, value: {{ .Values.chat.adapters | quote }}}
+            {{- /* Unset values may come from the existing secret instead. */}}
+            {{- with .Values.chat.telegram.chatIds }}
+            - {name: TELEGRAM_CHAT_IDS, value: {{ . | quote }}}
+            {{- end }}
+            {{- with .Values.chat.telegram.threadId }}
+            - {name: TELEGRAM_THREAD_ID, value: {{ . | quote }}}
+            {{- end }}
+            {{- with .Values.chat.telegram.approvers }}
+            - {name: TELEGRAM_APPROVERS, value: {{ . | quote }}}
+            {{- end }}
+            {{- if .Values.web.enabled }}
+            - {name: WEB_BASE_URL, value: {{ .Values.web.baseUrl | quote }}}
+            {{- end }}
+          {{- with .Values.chat.telegram.existingSecret }}
+          envFrom:
+            - secretRef: {name: {{ . }}, optional: true}
+          {{- end }}
+          ports:
+            - {name: metrics, containerPort: 9090}
+          livenessProbe:
+            httpGet: {path: /metrics, port: metrics}
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          resources: {{- toYaml .Values.chatGateway.resources | nindent 12 }}
+          securityContext: {{- include "aisre.securityContext" . | nindent 12 }}

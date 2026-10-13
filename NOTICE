@@ -1,0 +1,14 @@
+Ventrolab AI SRE
+Copyright 2026 Ventrolab
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+"Ventrolab" and the Ventrolab logo are trademarks of Ventrolab. The Apache License does not
+grant permission to use them, except as required for reasonable and customary use in
+describing the origin of the work.
+
+This product bundles or deploys third-party software under its own licenses, among them:
+- HolmesGPT (Apache-2.0), as a Helm subchart and container image
+- NATS server and its Helm chart (Apache-2.0)
+- LiteLLM (MIT), as a container image
+- PostgreSQL (PostgreSQL License), as a container image

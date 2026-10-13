@@ -1,0 +1,19 @@
+apiVersion: ai-sre.io/v1
+kind: Playbook
+metadata:
+  name: delete-failed-job
+spec:
+  enabled: true
+  description: Delete a permanently failed Job so its CronJob can schedule the next run
+  risk: low
+  match:
+    alertnames: [KubeJobFailed]
+    targetKind: k8s.job
+  action:
+    primitive: k8s.job.delete
+    params:
+      namespace: "{{ target.namespace }}"
+      job: "{{ target.workload }}"
+  rollback: none
+  limits:
+    maxPerTargetPerHour: 3

@@ -1,0 +1,21 @@
+{{- if not .Values.remediation.playbooks.existingConfigMap }}
+{{- $files := dict -}}
+{{- if .Values.remediation.playbooks.includeDefault -}}
+{{- range $path, $_ := .Files.Glob "files/playbooks/*.yaml" -}}
+{{- $_ := set $files (base $path) ($.Files.Get $path) -}}
+{{- end -}}
+{{- end -}}
+{{- range $file, $body := .Values.remediation.playbooks.extra -}}
+{{- $_ := set $files $file $body -}}
+{{- end -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-playbooks
+  labels: {{- include "aisre.labels" . | nindent 4 }}
+data:
+{{- range $file, $body := $files }}
+  {{ $file }}: |
+{{ $body | indent 4 }}
+{{- end }}
+{{- end }}

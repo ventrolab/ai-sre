@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Audit log{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Audit log</h1><div class="sub">Sign-ins and actions taken in this console, latest 200.
+Incident-level actions are also in each incident's timeline.</div></div></div>
+<div class="card">
+  <table>
+    <tr><th>Time</th><th>User</th><th>Action</th><th>Target</th><th>Details</th></tr>
+    {% for e in entries %}
+    <tr><td class="small mono nowrap">{{ e.ts.strftime('%Y-%m-%d %H:%M:%S') }}</td><td>{{ e.username }}</td>
+      <td><span class="badge {{ 'bad' if 'failed' in e.action or 'denied' in e.action else '' }}">{{ e.action }}</span></td>
+      <td class="mono small">{{ e.target or '' }}</td><td class="mono small muted">{{ e.detail | tojson if e.detail else '' }}</td></tr>
+    {% else %}
+    <tr><td colspan="5" class="muted">Empty.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

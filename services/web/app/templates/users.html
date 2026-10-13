@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}Users{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Users</h1>
+<div class="sub">viewer: read only &middot; operator: approvals, investigations &middot; admin: users and configuration.
+SSO users get their role from identity provider groups at every sign-in.</div></div></div>
+{% if error %}<div class="alert bad">{{ error }}</div>{% endif %}
+{% if not cfg.local_auth %}<div class="alert info">Local authentication is disabled: local accounts cannot sign in. Sign-in is only through {{ cfg.oidc_name }}.</div>{% endif %}
+<div class="grid two">
+  <div class="card">
+    <table>
+      <tr><th>User</th><th>Source</th><th>Role</th><th>State</th><th class="num">Last sign-in</th><th></th></tr>
+      {% for u in users %}
+      <tr>
+        <td><strong>{{ u.username }}</strong>{% if u.display_name %}<div class="small muted">{{ u.display_name }}</div>{% endif %}
+          {% if u.email %}<div class="small muted">{{ u.email }}</div>{% endif %}</td>
+        <td><span class="badge {{ 'info' if u.source == 'oidc' else '' }}">{{ 'SSO' if u.source == 'oidc' else 'local' }}</span></td>
+        <td>
+          {% if u.source == 'local' %}
+          <form class="inline" method="post" action="/admin/users/{{ u.id }}">
+            <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="role">
+            <select name="role" onchange="this.form.submit()">{% for r in roles %}<option value="{{ r }}" {{ 'selected' if r == u.role }}>{{ r }}</option>{% endfor %}</select>
+          </form>
+          {% else %}{{ u.role }}{% endif %}
+        </td>
+        <td><span class="badge {{ 'bad' if u.disabled else 'ok' }}">{{ 'disabled' if u.disabled else 'active' }}</span></td>
+        <td class="num small muted">{{ u.last_login_at | ago }}</td>
+        <td class="num nowrap">
+          {% if u.id != user.id %}
+          <form class="inline" method="post" action="/admin/users/{{ u.id }}">
+            <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="{{ 'enable' if u.disabled else 'disable' }}">
+            <button class="btn small {{ '' if u.disabled else 'danger' }}" type="submit">{{ 'Enable' if u.disabled else 'Disable' }}</button>
+          </form>
+          {% endif %}
+          {% if u.source == 'local' and cfg.local_auth %}
+          <details style="display:inline-block;padding:0;border:0;margin:0;background:none"><summary class="btn small" style="list-style:none">Password</summary>
+            <form method="post" action="/admin/users/{{ u.id }}" class="row" style="margin-top:6px">
+              <input type="hidden" name="csrf" value="{{ csrf }}"><input type="hidden" name="action" value="password">
+              <input type="password" name="password" placeholder="new password" minlength="12" required>
+              <button class="btn small" type="submit">Set</button>
+            </form></details>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+  </div>
+  <div class="card">
+    <h2>New local user</h2>
+    {% if cfg.local_auth %}
+    <form method="post" action="/admin/users">
+      <input type="hidden" name="csrf" value="{{ csrf }}">
+      <label>Username</label><input name="username" required style="width:100%">
+      <label>Password (12+ characters)</label><input name="password" type="password" minlength="12" required style="width:100%">
+      <label>Role</label><select name="role" style="width:100%">{% for r in roles %}<option value="{{ r }}">{{ r }}</option>{% endfor %}</select>
+      <div style="margin-top:14px"><button class="btn primary" type="submit">Create</button></div>
+    </form>
+    {% else %}<div class="muted small">Disabled together with local authentication.</div>{% endif %}
+  </div>
+</div>
+{% endblock %}

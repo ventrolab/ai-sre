@@ -1,0 +1,24 @@
+apiVersion: ai-sre.io/v1
+kind: Playbook
+metadata:
+  name: restart-oom-deployment
+spec:
+  enabled: true
+  description: Rolling restart of a deployment whose memory grows until OOM (buys time for a leak fix)
+  risk: medium
+  match:
+    alertnames: [KubeContainerOOMKilled, ContainerMemoryNearLimit]
+    targetKind: k8s.pod
+  action:
+    primitive: k8s.deployment.restart
+    params:
+      namespace: "{{ target.namespace }}"
+      deployment: "{{ target.workload }}"
+  verify:
+    promql: >
+      sum(kube_deployment_status_replicas_available{namespace="{{ target.namespace }}",deployment="{{ target.workload }}"})
+      == sum(kube_deployment_spec_replicas{namespace="{{ target.namespace }}",deployment="{{ target.workload }}"})
+    timeout: 10m
+  rollback: none
+  limits:
+    maxPerTargetPerHour: 1

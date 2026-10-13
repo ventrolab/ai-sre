@@ -1,0 +1,78 @@
+# Broken workloads that raise alerts for the demo. Each has a different root cause.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shop
+---
+# Crash loop: the app exits because its config file is not mounted (KubePodCrashLooping).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: checkout
+  namespace: shop
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: checkout}
+  template:
+    metadata:
+      labels: {app: checkout}
+    spec:
+      containers:
+        - name: app
+          image: busybox:1.36.1
+          command: [sh, -c, 'echo "checkout 2.4.1 starting"; echo "loading config from /etc/checkout/config.yaml"; sleep 5;
+            echo "FATAL: config file /etc/checkout/config.yaml not found" >&2; exit 1']
+          resources:
+            requests: {cpu: 5m, memory: 8Mi}
+            limits: {memory: 32Mi}
+---
+# Memory: the in-process cache grows past the 48 MiB limit and the container is OOM killed.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cart
+  namespace: shop
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: cart}
+  template:
+    metadata:
+      labels: {app: cart}
+    spec:
+      containers:
+        - name: app
+          image: busybox:1.36.1
+          command: [sh, -c, 'echo "cart: warming product cache"; sleep 10;
+            chunk=$(head -c 1048576 /dev/zero | tr "\0" x); cache=""; i=0;
+            while true; do cache="$cache$chunk"; i=$((i+1)); echo "cache size $i MiB"; sleep 1; done']
+          resources:
+            requests: {cpu: 5m, memory: 16Mi}
+            limits: {memory: 48Mi}
+---
+# Failing job: the report cannot reach its database (no such service).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: nightly-report
+  namespace: shop
+spec:
+  schedule: "*/10 * * * *"
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 2
+  jobTemplate:
+    spec:
+      backoffLimit: 1
+      template:
+        spec:
+          restartPolicy: Never
+          containers:
+            - name: report
+              image: busybox:1.36.1
+              command: [sh, -c, 'echo "report: connecting to orders-db.shop.svc:5432";
+                if ! nc -z -w 3 orders-db.shop.svc 5432; then echo "ERROR: cannot connect to orders-db.shop.svc:5432" >&2; exit 2; fi']
+              resources:
+                requests: {cpu: 5m, memory: 8Mi}
+                limits: {memory: 32Mi}

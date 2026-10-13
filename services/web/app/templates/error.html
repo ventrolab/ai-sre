@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Error {{ code }}{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>{{ 'Access denied' if code == 403 else 'Not found' }}</h1>
+<div class="sub">{{ detail }}</div></div></div>
+<a class="btn" href="/">Back to the dashboard</a>
+{% endblock %}

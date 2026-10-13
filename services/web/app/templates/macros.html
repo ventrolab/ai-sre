@@ -1,0 +1,22 @@
+{% macro status_badge(status) -%}
+{%- set cls = {"resolved": "ok", "closed": "ok", "diagnosed": "info", "investigating": "warn", "new": "warn",
+               "awaiting_approval": "warn", "remediating": "warn", "verifying": "info",
+               "investigation_failed": "bad", "remediated": "ok", "remediation_failed": "bad"}.get(status, "") -%}
+<span class="badge {{ cls }}">{{ status_labels.get(status, status) }}</span>
+{%- endmacro %}
+
+{% macro confidence(value) -%}
+{%- if value is none -%}<span class="muted">-</span>
+{%- else -%}{%- set pct = (value * 100) | round | int -%}
+<span class="badge {{ 'ok' if pct >= 80 else ('warn' if pct >= 40 else 'bad') }}">{{ pct }}%</span>
+{%- endif -%}
+{%- endmacro %}
+
+{% macro target(t) -%}
+<span class="mono small">{{ t.namespace ~ '/' if t.namespace }}{{ t.workload or t.pod or t.node or t.host or t.cluster or '-' }}</span>
+{%- endmacro %}
+
+{% macro decision_badge(d) -%}
+{%- set cls = {"execute": "ok", "propose": "info", "approval_required": "warn", "deny": "bad"}.get(d, "") -%}
+<span class="badge {{ cls }}">{{ d }}</span>
+{%- endmacro %}

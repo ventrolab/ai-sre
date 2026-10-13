@@ -1,0 +1,44 @@
+{{- range .Values.checks }}
+---
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ $.Release.Name }}-check-{{ .name }}
+  labels: {{- include "aisre.labels" $ | nindent 4 }}
+    app.kubernetes.io/name: check
+spec:
+  schedule: {{ .schedule | quote }}
+  concurrencyPolicy: Forbid
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      backoffLimit: 2
+      template:
+        spec:
+          restartPolicy: Never
+          enableServiceLinks: false
+          {{- include "aisre.scheduling" $ | nindent 10 }}
+          containers:
+            - name: check
+              image: curlimages/curl:8.10.1
+              env:
+                - name: INGEST_TOKEN
+                  valueFrom:
+                    secretKeyRef: {name: {{ $.Release.Name }}-secrets, key: INGEST_TOKEN}
+                - name: BODY
+                  value: {{ dict "name" .name "query" .query | toJson | quote }}
+              command:
+                - sh
+                - -c
+                - >-
+                  curl -fsS -X POST {{ include "aisre.ingestUrl" $ }}/v1/checks
+                  -H "Authorization: Bearer $INGEST_TOKEN"
+                  -H "Content-Type: application/json" -d "$BODY"
+              resources:
+                requests: {cpu: 10m, memory: 16Mi}
+                limits: {memory: 64Mi}
+              securityContext: {{- include "aisre.securityContext" $ | nindent 16 }}
+                # The image user is a name (curl_user); runAsNonRoot needs a numeric uid.
+                runAsUser: 65534
+{{- end }}

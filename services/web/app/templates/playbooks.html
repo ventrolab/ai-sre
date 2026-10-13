@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Playbooks{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Playbooks</h1>
+<div class="sub">The remediation catalog. Edit the catalog ConfigMap or Git source; the Action Guard reloads it within seconds.</div></div>
+{% if guard %}<div class="row"><span class="badge {{ 'info' if guard.mode == 'readonly' else 'warn' }}">SRE_MODE={{ guard.mode }}</span>
+<span class="badge">catalog {{ guard.catalog_version }}</span>
+<span class="badge {{ 'ok' if guard.catalog_valid else 'bad' }}">{{ 'valid' if guard.catalog_valid else 'update rejected' }}</span></div>{% endif %}
+</div>
+{% if guard and guard.catalog_error %}<div class="alert bad"><strong>The latest catalog change was rejected.</strong> The previous version stays active.<pre>{{ guard.catalog_error }}</pre></div>{% endif %}
+{% if guard and guard.mode == 'readonly' %}<div class="alert info">Read-only mode: playbooks are proposed in chat, never executed.</div>{% endif %}
+{% for p in items %}
+<details>
+  <summary>{{ p.name }} <span class="badge {{ {'low': 'ok', 'medium': 'warn', 'high': 'bad'}.get(p.risk, '') }}">{{ p.risk }}</span>
+    {% if not p.enabled %}<span class="badge">disabled</span>{% endif %}
+    <span class="muted">&middot; {{ p.description }}</span></summary>
+  <dl class="kv small" style="margin-top:10px">
+    <dt>Action</dt><dd class="mono">{{ p.primitive }}</dd>
+    <dt>Alerts</dt><dd class="mono">{{ (p.match.alertnames or ['any']) | join(', ') }}</dd>
+    <dt>Target kind</dt><dd class="mono">{{ p.match.target_kind or 'any' }}</dd>
+    {% if p.match.labels %}<dt>Scope</dt><dd class="mono">{{ p.match.labels | tojson }}</dd>{% endif %}
+  </dl>
+  {% if sources.get(p.name) %}<pre>{{ sources[p.name] }}</pre>{% endif %}
+</details>
+{% else %}
+<div class="alert bad">The catalog is not available: Action Guard is down or has no valid catalog.</div>
+{% endfor %}
+{% endblock %}

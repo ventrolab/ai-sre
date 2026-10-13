@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+{% from "macros.html" import status_badge, confidence, target, decision_badge %}
+{% block title %}{{ inc.title }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="small muted"><a href="/incidents">Incidents</a> / <span class="mono">{{ inc.id[:8] }}</span></div>
+    <h1>{{ inc.title }}</h1>
+    <div class="row">{{ status_badge(inc.status) }} {{ confidence(inc.confidence) }}
+      <span class="muted small">opened {{ inc.created_at | ago }}, updated {{ inc.updated_at | ago }}</span></div>
+  </div>
+  {% if user.role in ('operator', 'admin') and inc.status not in ('resolved', 'closed', 'new', 'investigating') %}
+  <form method="post" action="/incidents/{{ inc.id }}/reinvestigate">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button class="btn" type="submit">Investigate again</button>
+  </form>
+  {% endif %}
+</div>
+{% if request.query_params.get('queued') %}<div class="alert info">Investigation queued. It usually takes under a minute; reload the page to see the result.</div>{% endif %}
+{% if inc.status in ('new', 'investigating') %}<div class="alert warn"><span class="spinner"></span>Investigation in progress.</div>{% endif %}
+
+<div class="grid two">
+  <div class="grid">
+    <div class="card">
+      <h2>Root cause analysis</h2>
+      {% if inc.root_cause %}<p><strong>Root cause:</strong> {{ inc.root_cause }}</p>{% endif %}
+      {% if inc.analysis %}<div class="prose">{{ inc.analysis | markdown | safe }}</div>
+      {% else %}<div class="muted">No analysis yet.</div>{% endif %}
+    </div>
+    {% for a in inc.approvals %}
+    <div class="card">
+      <h2>Approval: <span class="mono">{{ a.playbook }}</span> <span class="badge {{ 'warn' if a.status == 'pending' else ('ok' if a.status == 'approved' else '') }}">{{ a.status }}</span></h2>
+      <dl class="kv small">
+        <dt>Requested</dt><dd>{{ a.requested_at | ago }}</dd>
+        <dt>Expires</dt><dd>{{ a.expires_at.strftime('%Y-%m-%d %H:%M UTC') }}</dd>
+        {% if a.decided_by %}<dt>Decided by</dt><dd>{{ a.decided_by }}, {{ a.decided_at | ago }}</dd>{% endif %}
+      </dl>
+      {% if a.status == 'pending' and user.role in ('operator', 'admin') %}
+      <div class="row" style="margin-top:12px">
+        <form class="inline" method="post" action="/approvals/{{ a.id }}/approve"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn primary" type="submit">Approve</button></form>
+        <form class="inline" method="post" action="/approvals/{{ a.id }}/reject"><input type="hidden" name="csrf" value="{{ csrf }}"><button class="btn danger" type="submit">Reject</button></form>
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+    <div class="card">
+      <h2>Timeline</h2>
+      <ul class="timeline">
+        {% for e in inc.events %}
+        <li><span class="mono small muted">{{ e.ts.strftime('%H:%M:%S') }}</span><span>{{ e.type }}</span>
+          <span class="small muted mono">{{ e.data | tojson | truncate(220) }}</span></li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+  <div class="grid" style="align-content:start">
+    <div class="card">
+      <h2>Target</h2>
+      <dl class="kv small">
+        {% for k in ['kind', 'cluster', 'namespace', 'workload', 'pod', 'node', 'host'] %}
+          {% if inc.target.get(k) %}<dt>{{ k }}</dt><dd class="mono">{{ inc.target[k] }}</dd>{% endif %}
+        {% endfor %}
+        <dt>key</dt><dd class="mono">{{ inc.key }}</dd>
+      </dl>
+    </div>
+    <div class="card">
+      <h2>Remediation</h2>
+      {% if inc.decision %}
+        <dl class="kv small">
+          <dt>Playbook</dt><dd class="mono">{{ inc.decision.playbook }}</dd>
+          <dt>Decision</dt><dd>{{ decision_badge(inc.decision.decision) }}</dd>
+          <dt>Risk</dt><dd>{{ inc.decision.risk or '-' }}</dd>
+          <dt>Reason</dt><dd>{{ inc.decision.reason }}</dd>
+          {% if inc.decision.action %}<dt>Action</dt><dd class="mono">{{ inc.decision.action.primitive }}({% for k, v in (inc.decision.action.params or {}).items() %}{{ k }}={{ v }}{{ ', ' if not loop.last }}{% endfor %})</dd>{% endif %}
+        </dl>
+      {% else %}<div class="muted small">{{ 'No playbook applies.' if inc.analysis else 'Not evaluated yet.' }}</div>{% endif %}
+    </div>
+    <div class="card">
+      <h2>Alerts ({{ inc.alerts | length }})</h2>
+      {% for a in inc.alerts %}
+      <div class="small" style="margin-bottom:10px">
+        <div class="row"><span class="mono">{{ a.alertname }}</span><span class="badge {{ 'ok' if a.status == 'resolved' else 'warn' }}">{{ a.status }}</span></div>
+        {% if a.annotations and a.annotations.summary %}<div class="muted">{{ a.annotations.summary }}</div>{% endif %}
+        <div class="muted mono">since {{ a.starts_at }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    <div class="card">
+      <h2>Similar incidents</h2>
+      {% for s in similar %}
+      <div class="small" style="margin-bottom:10px">
+        <div class="row"><a href="/incidents/{{ s.id }}">{{ s.title }}</a>{{ status_badge(s.status) }}
+          {% if s.id in similar_used %}<span class="badge info" title="Given to the investigation as a hint">used in RCA</span>{% endif %}</div>
+        <div class="muted">{{ s.root_cause | truncate(200) }}</div>
+        <div class="muted">{{ s.created_at | ago }}{% if s.playbook %}, playbook <span class="mono">{{ s.playbook }}</span> ({{ s.decision or 'proposed' }}){% endif %}</div>
+      </div>
+      {% else %}
+      <div class="muted small">No diagnosed past incidents match this one.</div>
+      {% endfor %}
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-controller
+  labels: {{- include "aisre.labels" . | nindent 4 }}
+    app.kubernetes.io/name: controller
+spec:
+  # One consumer owns incident state; see ARCHITECTURE.md section 8 for HA.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: {{- include "aisre.selector" (dict "root" . "name" "controller") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "aisre.selector" (dict "root" . "name" "controller") | nindent 8 }}
+    spec:
+      enableServiceLinks: false
+      {{- include "aisre.scheduling" $ | nindent 6 }}
+      containers:
+        - name: controller
+          image: {{ include "aisre.image" (dict "root" . "name" "controller") }}
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            {{- include "aisre.licenseEnv" . | nindent 12 }}
+            - {name: NATS_URL, value: {{ include "aisre.natsUrl" . | quote }}}
+            - {name: CLUSTER_NAME, value: {{ .Values.clusterName | quote }}}
+            - {name: WEB_BASE_URL, value: {{ .Values.web.baseUrl | quote }}}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: {{ .Release.Name }}-secrets, key: POSTGRES_PASSWORD}
+            - name: DATABASE_URL
+              value: postgresql://aisre:$(POSTGRES_PASSWORD)@{{ .Release.Name }}-postgres:5432/aisre
+            - {name: HOLMES_URL, value: "http://{{ .Release.Name }}-holmes:80"}
+            - {name: HOLMES_MODEL, value: default}
+            - {name: HOLMES_TIMEOUT_SECONDS, value: {{ .Values.controller.holmesTimeoutSeconds | quote }}}
+            - {name: ACTION_GUARD_URL, value: {{ include "aisre.guardUrl" . | quote }}}
+            - {name: MAX_PARALLEL_INVESTIGATIONS, value: {{ .Values.controller.maxParallelInvestigations | quote }}}
+            - {name: APPROVAL_TTL_SECONDS, value: {{ .Values.remediation.approvalTTLSeconds | quote }}}
+          ports:
+            - {name: metrics, containerPort: 9090}
+          livenessProbe:
+            httpGet: {path: /metrics, port: metrics}
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          resources: {{- toYaml .Values.controller.resources | nindent 12 }}
+          securityContext: {{- include "aisre.securityContext" . | nindent 12 }}

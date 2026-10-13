@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Ask HolmesGPT{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Ask HolmesGPT</h1>
+<div class="sub">Ad-hoc investigations with read-only tools: metrics, logs, events and specs. Nothing is changed.</div></div></div>
+<div class="card" style="margin-bottom:14px">
+  <form method="post" action="/ask">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <textarea name="question" placeholder="Why do pods of deployment crashy in namespace demo restart?" required></textarea>
+    <div class="row" style="margin-top:10px;justify-content:space-between">
+      <span class="small muted">Answers usually take 30-90 seconds.</span>
+      <button class="btn primary" type="submit">Investigate</button>
+    </div>
+  </form>
+</div>
+<div class="card">
+  <h2>Your questions</h2>
+  {% for q in questions %}{% include "_question.html" %}{% else %}<div class="muted">No questions yet.</div>{% endfor %}
+</div>
+{% endblock %}

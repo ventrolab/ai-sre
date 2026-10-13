@@ -1,0 +1,23 @@
+apiVersion: ai-sre.io/v1
+kind: Playbook
+metadata:
+  name: restart-failed-systemd-unit
+spec:
+  enabled: true
+  description: Restart a failed systemd unit on a standalone host
+  risk: medium
+  match:
+    alertnames: [NodeSystemdServiceFailed]
+    targetKind: host.unit
+  action:
+    primitive: host.systemd.restart
+    params:
+      host: "{{ target.host }}"
+      unit: "{{ alert.labels.name }}"
+  verify:
+    promql: >
+      node_systemd_unit_state{instance=~"{{ target.host }}.*",name="{{ alert.labels.name }}",state="active"} == 1
+    timeout: 5m
+  rollback: none
+  limits:
+    maxPerTargetPerHour: 2

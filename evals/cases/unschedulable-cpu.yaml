@@ -1,0 +1,28 @@
+name: unschedulable-cpu
+description: The pod requests more CPU than any node has, so it stays Pending.
+namespace: analytics
+steps:
+  - apply: |
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata: {name: analytics-batch}
+      spec:
+        replicas: 1
+        selector: {matchLabels: {app: analytics-batch}}
+        template:
+          metadata: {labels: {app: analytics-batch}}
+          spec:
+            containers:
+              - name: batch
+                image: busybox:1.36.1
+                command: [sleep, "3600"]
+                resources: {requests: {cpu: "64", memory: 8Mi}, limits: {memory: 32Mi}}
+    wait: {selector: app=analytics-batch, reasons: [Unschedulable]}
+alert:
+  alertname: KubePodNotReady
+  labels: {severity: warning}
+  summary: Pod {namespace}/{pod} has been in a non-ready state for longer than 15 minutes.
+expect:
+  root_cause: [[cpu], [insufficient, request, unschedulable, no node, exceeds]]
+  playbook: null
+  min_confidence: 0.7

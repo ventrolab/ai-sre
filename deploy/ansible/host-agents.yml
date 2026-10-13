@@ -1,0 +1,10 @@
+---
+# Installs and enrolls the AI SRE host-agent on standalone hosts:
+#   ansible-playbook -i inventory.ini deploy/ansible/host-agents.yml --ask-vault-pass
+# Variables (group_vars or -e): ai_sre_console_url, ai_sre_api_token (vault),
+# ai_sre_hub_url, ai_sre_host_agent_binary_src, optional ai_sre_host_agent_labels.
+- name: AI SRE host agents
+  hosts: ai_sre_hosts
+  become: true
+  roles:
+    - ai_sre_host_agent

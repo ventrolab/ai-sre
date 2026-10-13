@@ -1,0 +1,58 @@
+{{- $name := printf "%s-postgres" .Release.Name -}}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ $name }}
+  labels: {{- include "aisre.labels" . | nindent 4 }}
+    app.kubernetes.io/name: postgres
+spec:
+  serviceName: {{ $name }}
+  replicas: 1
+  selector:
+    matchLabels: {{- include "aisre.selector" (dict "root" . "name" "postgres") | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "aisre.selector" (dict "root" . "name" "postgres") | nindent 8 }}
+    spec:
+      securityContext:
+        fsGroup: 999
+      {{- include "aisre.scheduling" $ | nindent 6 }}
+      containers:
+        - name: postgres
+          image: {{ .Values.postgres.image }}
+          env:
+            - {name: POSTGRES_USER, value: aisre}
+            - {name: POSTGRES_DB, value: aisre}
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: {name: {{ .Release.Name }}-secrets, key: POSTGRES_PASSWORD}
+            - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
+          ports:
+            - {name: postgres, containerPort: 5432}
+          readinessProbe:
+            exec: {command: [pg_isready, -U, aisre, -d, aisre]}
+            periodSeconds: 10
+          resources: {{- toYaml .Values.postgres.resources | nindent 12 }}
+          volumeMounts:
+            - {name: data, mountPath: /var/lib/postgresql/data}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        {{- with .Values.postgres.storageClassName }}
+        storageClassName: {{ . }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.postgres.size }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  labels: {{- include "aisre.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "aisre.selector" (dict "root" . "name" "postgres") | nindent 4 }}
+  ports:
+    - {name: postgres, port: 5432, targetPort: postgres}

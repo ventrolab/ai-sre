@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Targets{% endblock %}
+{% block content %}
+<div class="page-head"><div><h1>Targets</h1>
+<div class="sub">Clusters and hosts reachable through agents connected to the Tool Hub. HolmesGPT uses their read tools; the Action Guard runs playbook actions only on targets with write access.</div></div>
+{% if hub_ok %}<div class="row"><span class="badge ok">{{ rows | length }} connected</span></div>{% endif %}
+</div>
+{% if not hub_configured %}
+<div class="alert info">The Tool Hub is not configured for the console (<span class="mono">TOOL_HUB_URL</span>), so connected agents are not shown.</div>
+{% elif not hub_ok %}
+<div class="alert bad">The Tool Hub is not reachable; the list of connected agents is not available.</div>
+{% endif %}
+{% if hub_ok %}
+<div class="card">
+  <table>
+    <tr><th>Target</th><th>Labels</th><th>Read tools</th><th>Write actions</th><th class="num nowrap">Open</th><th class="num nowrap">7 days</th><th>Agent</th><th class="num">Connected</th></tr>
+    {% for t in rows %}
+    <tr>
+      <td><strong>{{ t.name }}</strong><div class="small muted">{{ t.kind }}</div></td>
+      <td class="small">{% for k, v in (t.labels or {}).items() %}<span class="badge mono">{{ k }}={{ v }}</span> {% else %}<span class="muted">-</span>{% endfor %}</td>
+      <td class="small mono">{{ t.read_tools | join(', ') or '-' }}</td>
+      <td class="small">{% if t.actions %}<span class="badge warn">enabled</span><div class="mono muted">{{ t.actions | join(', ') }}</div>{% else %}<span class="badge">read-only</span>{% endif %}</td>
+      <td class="num">{% if t.stats.open %}<a href="/incidents?status=open&q={{ t.name | urlencode }}">{{ t.stats.open }}</a>{% else %}0{% endif %}</td>
+      <td class="num">{{ t.stats.recent or 0 }}</td>
+      <td class="small mono muted">{{ t.version or '-' }}<div>{{ t.remote }}</div></td>
+      <td class="num small muted nowrap">{{ t.connected_at | ago }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="8" class="muted">No agents are connected.</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% if missing %}
+<div class="card" style="margin-top:16px">
+  <h2>Targets without an agent</h2>
+  <div class="small muted" style="margin-bottom:8px">These had incidents recently, but no agent is connected for them now: the agent is offline or was never installed. Investigations there cannot use target tools.</div>
+  <table>
+    <tr><th>Target</th><th class="num">Open incidents</th><th class="num">Last 7 days</th><th class="num">Last incident</th></tr>
+    {% for m in missing %}
+    <tr>
+      <td><strong>{{ m.name }}</strong><div class="small muted">{{ m.kind }}</div></td>
+      <td class="num">{% if m.open %}<a href="/incidents?status=open&q={{ m.name | urlencode }}">{{ m.open }}</a>{% else %}0{% endif %}</td>
+      <td class="num">{{ m.recent }}</td>
+      <td class="num small muted nowrap">{{ m.last_at | ago }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+</div>
+{% endif %}
+{% endif %}
+{% endblock %}

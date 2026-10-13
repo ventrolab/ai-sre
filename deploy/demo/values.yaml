@@ -1,0 +1,56 @@
+# Ventrolab AI SRE in the local kind demo (deploy/demo, `make demo`).
+# Everything runs in one kind node; the only external dependency is the LLM API.
+clusterName: demo
+
+remediation:
+  # Proposals only. `make demo MODE=autofix` lets low-risk playbooks run.
+  mode: readonly
+  maxRisk: low
+
+llm:
+  # LLM_PROVIDER=claude (ANTHROPIC_API_KEY) or openai (OPENAI_API_KEY); the Makefile sets
+  # the provider and creates the Secret from the environment. "mock" needs no key and
+  # returns a canned RCA (CI smoke test).
+  provider: claude
+  existingSecret: ai-sre-llm-providers
+  models:
+    mock:
+      model: openai/mock
+      api_key: mock
+      mock_response: |
+        The pod of deployment shop/checkout exits with code 1 a few seconds after start.
+        Its log ends with "FATAL: config file /etc/checkout/config.yaml not found":
+        the deployment mounts no ConfigMap at /etc/checkout.
+
+        ```json
+        {"summary": "checkout crash loops: its config file is missing",
+         "root_cause": "The deployment shop/checkout mounts no config at /etc/checkout, so the app exits at start.",
+         "confidence": 0.9, "playbook": null,
+         "playbook_reason": "A restart does not help: the config is missing.",
+         "chat_report": "shop/checkout crash loops.\n**Root cause:** /etc/checkout/config.yaml is not mounted.\n**Fix:** mount the config ConfigMap; a restart will not help."}
+        ```
+
+# Investigation results go to the chat-gateway log and the web console.
+chat:
+  adapters: console
+
+controller:
+  maxParallelInvestigations: 1
+
+web:
+  # Reached through the kind port mapping (DEMO_PORT, default 8088).
+  baseUrl: http://localhost:8088
+  service:
+    type: NodePort
+    nodePort: 30080
+
+holmes:
+  toolsets:
+    prometheus/metrics:
+      enabled: true
+      config:
+        prometheus_url: http://vmsingle-victoria-metrics-single-server.monitoring.svc:8428
+
+localAgent:
+  prometheus:
+    url: http://vmsingle-victoria-metrics-single-server.monitoring.svc:8428

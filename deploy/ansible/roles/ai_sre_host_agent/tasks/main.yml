@@ -1,0 +1,125 @@
+---
+- name: Check required settings
+  ansible.builtin.assert:
+    that:
+      - ai_sre_console_url | length > 0
+      - ai_sre_api_token | length > 0
+      - ai_sre_hub_url | length > 0
+      - ai_sre_host_agent_binary_src | length > 0
+      - ai_sre_host_agent_name is match('^[a-z0-9]([a-z0-9.-]{0,61}[a-z0-9])?$')
+      - ai_sre_agent_auth in ['token', 'mtls']
+    fail_msg: set ai_sre_console_url, ai_sre_api_token, ai_sre_hub_url, ai_sre_host_agent_binary_src; the name must be a DNS label; ai_sre_agent_auth is token or mtls
+    quiet: true
+
+- name: Service user (adm reads /var/log and the journal)
+  ansible.builtin.user:
+    name: ai-sre
+    system: true
+    shell: /usr/sbin/nologin
+    create_home: false
+    groups: [adm]
+    append: true
+
+- name: Config directory
+  ansible.builtin.file:
+    path: /etc/ai-sre
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Credentials directory, owned by the service user
+  ansible.builtin.file:
+    path: "{{ ai_sre_host_agent_credentials_dir }}"
+    state: directory
+    owner: ai-sre
+    group: ai-sre
+    mode: "0700"
+
+- name: Binary
+  ansible.builtin.copy:
+    src: "{{ ai_sre_host_agent_binary_src }}"
+    dest: /usr/local/bin/ai-sre-host-agent
+    owner: root
+    group: root
+    mode: "0755"
+  notify: Restart ai-sre-host-agent
+
+- name: Config
+  ansible.builtin.template:
+    src: host-agent.yaml.j2
+    dest: /etc/ai-sre/host-agent.yaml
+    owner: root
+    group: ai-sre
+    mode: "0640"
+  notify: Restart ai-sre-host-agent
+
+- name: Existing credential
+  ansible.builtin.stat:
+    path: "{{ ai_sre_host_agent_credentials_dir }}/{{ 'tls.crt' if ai_sre_agent_auth == 'mtls' else 'token' }}"
+  register: ai_sre_credential
+
+- name: Enroll
+  when: not ai_sre_credential.stat.exists or ai_sre_host_agent_reenroll | bool
+  block:
+    # On the controller: the API token never reaches the host.
+    - name: Create a join token
+      ansible.builtin.uri:
+        url: "{{ ai_sre_console_url | regex_replace('/$', '') }}/api/v1/agents/enrollments"
+        method: POST
+        headers:
+          Authorization: "Bearer {{ ai_sre_api_token }}"
+        body_format: json
+        body:
+          name: "{{ ai_sre_host_agent_name }}"
+          ttl_hours: "{{ ai_sre_host_agent_join_ttl_hours | int }}"
+          note: "ansible {{ inventory_hostname }}"
+          replace: "{{ ai_sre_host_agent_reenroll | bool }}"
+        status_code: [201]
+        validate_certs: "{{ ai_sre_api_validate_certs }}"
+        # ~/.netrc on the controller must not replace the API token.
+        use_netrc: false
+      delegate_to: localhost
+      become: false
+      register: ai_sre_enrollment
+      no_log: "{{ ai_sre_no_log | bool }}"
+
+    # The token goes through the environment, not the command line (process list).
+    - name: Exchange the join token for the agent credential
+      ansible.builtin.command:
+        argv: "{{ ['/usr/local/bin/ai-sre-host-agent', 'enroll', '-config', '/etc/ai-sre/host-agent.yaml']
+                  + (['-ca-sha256', ai_sre_enrollment.json.ca_sha256]
+                     if ai_sre_agent_auth == 'mtls' or ai_sre_hub_ca_pinned | bool else []) }}"
+      environment:
+        AISRE_JOIN_TOKEN: "{{ ai_sre_enrollment.json.join_token }}"
+      changed_when: true
+      no_log: "{{ ai_sre_no_log | bool }}"
+      notify: Restart ai-sre-host-agent
+
+    - name: Credentials belong to the service user
+      ansible.builtin.file:
+        path: "{{ ai_sre_host_agent_credentials_dir }}/{{ item.name }}"
+        owner: ai-sre
+        group: ai-sre
+        mode: "{{ item.mode }}"
+      loop: "{{ ([{'name': 'ca.crt', 'mode': '0644'}, {'name': 'tls.crt', 'mode': '0644'}, {'name': 'tls.key', 'mode': '0600'}]
+                if ai_sre_agent_auth == 'mtls' else [{'name': 'token', 'mode': '0600'}]
+                + ([{'name': 'ca.crt', 'mode': '0644'}] if ai_sre_hub_ca_pinned | bool else [])) }}"
+
+- name: Systemd unit
+  ansible.builtin.template:
+    src: ai-sre-host-agent.service.j2
+    dest: /etc/systemd/system/ai-sre-host-agent.service
+    owner: root
+    group: root
+    mode: "0644"
+  when: ai_sre_host_agent_manage_service | bool
+  notify: Restart ai-sre-host-agent
+
+- name: Service enabled and running
+  ansible.builtin.systemd_service:
+    name: ai-sre-host-agent
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: ai_sre_host_agent_manage_service | bool
